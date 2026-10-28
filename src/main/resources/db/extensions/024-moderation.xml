@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter safety patch B (user 2026-10-27, docs/MODERATION.md, package server.moderation).
+         storyreports: one row per player report. reason 0 cheating/bot, 1 insults/threats, 2 spam/ads, 3 other.
+                       proof = the last chat lines the REPORTED hero sent, taken by the server (never by the client).
+                       status 0 open, 1 done. gmlog = every GM action about the reported hero while the report was open.
+                       Rows older than log_keep_days are deleted by server.starter.StoryLogCleanup (privacy promise).
+         storymutes:   one row per muted hero (charid). untilms = end of the mute (epoch ms). Loaded into memory at
+                       server start (server.moderation.StoryMutes), so the chat path never asks the database.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-024-story-reports" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyreports"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyreports
+            (
+                id           INT          NOT NULL AUTO_INCREMENT,
+                createdms    BIGINT       NOT NULL,
+                reporterid   INT          NOT NULL,
+                reportername VARCHAR(13)  NOT NULL DEFAULT '',
+                victimid     INT          NOT NULL,
+                victimname   VARCHAR(13)  NOT NULL DEFAULT '',
+                reason       TINYINT      NOT NULL DEFAULT 3,
+                mapid        INT          NOT NULL DEFAULT 0,
+                note         VARCHAR(200) NOT NULL DEFAULT '',
+                proof        TEXT         NOT NULL,
+                status       TINYINT      NOT NULL DEFAULT 0,
+                handledby    VARCHAR(13)  NOT NULL DEFAULT '',
+                handledms    BIGINT       NOT NULL DEFAULT 0,
+                gmlog        TEXT         NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_storyreports_status (status, id),
+                KEY idx_storyreports_victim (victimid, status)
+            );
+        </sql>
+    </changeSet>
+
+    <changeSet id="ext-024-story-mutes" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storymutes"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storymutes
+            (
+                charid    INT          NOT NULL,
+                untilms   BIGINT       NOT NULL,
+                reason    VARCHAR(100) NOT NULL DEFAULT '',
+                byname    VARCHAR(13)  NOT NULL DEFAULT '',
+                createdms BIGINT       NOT NULL,
+                PRIMARY KEY (charid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

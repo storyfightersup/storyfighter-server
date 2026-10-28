@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Level cap 999: one level past 200 needs more EXP than an INT holds (ExpTable.MAX_LEVEL). -->
+    <changeSet id="ext-003-level-999-exp-bigint" author="automaplems">
+        <sql>
+            ALTER TABLE characters MODIFY exp BIGINT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

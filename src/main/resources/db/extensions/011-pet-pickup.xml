@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter pet pickup time (user 2026-10-24, server.starter.PetPickup). The server is the authority.
+         seconds  = banked pickup seconds left (one Pickup Ticket = 3600). While pickup runs, the server counts down
+                    in memory and writes the rest here on every change and about once a minute.
+         running  = 1 only while pickup was on at the last save. Login resumes it only when savedat is under a
+                    minute old (a channel change); a real logout and a death always save 0 (auto-pause).
+         savedat  = ms time of the last save.
+         petgiven / freeticket = 1 once this hero got its free pet / its free ticket (both given only once).
+         A hero without a row has 0 seconds and got nothing yet. The row goes away with the character.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-011-pet-pickup" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storypetpickup"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storypetpickup
+            (
+                characterid INT     NOT NULL,
+                seconds     INT     NOT NULL DEFAULT 0,
+                running     TINYINT NOT NULL DEFAULT 0,
+                savedat     BIGINT  NOT NULL DEFAULT 0,
+                petgiven    TINYINT NOT NULL DEFAULT 0,
+                freeticket  TINYINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (characterid),
+                FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
+            );
+        </sql>
+    </changeSet>
+
+    <!-- Every grant and use of pet pickup time, for support and a later web shop:
+         kind "tickets" = ticket items given (amount = how many), "seconds" = time put in the bank (a ticket used, or
+         tickets banked straight away because the bag was full; amount = seconds), "spent" = one pickup run ended
+         (amount = minus the seconds it used). balance = banked seconds after the line.
+         source = "free", "ticket", "gm:<name>", "shop:<order>" (later), "pause", "logout", "death", "empty", ...
+         Kept when the character is deleted (no foreign key), so shop deliveries stay traceable. -->
+    <changeSet id="ext-011-pet-pickup-log" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storypetpickuplog"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storypetpickuplog
+            (
+                id          INT         NOT NULL AUTO_INCREMENT,
+                characterid INT         NOT NULL,
+                kind        VARCHAR(16) NOT NULL,
+                amount      INT         NOT NULL,
+                balance     INT         NOT NULL,
+                source      VARCHAR(64) NOT NULL,
+                at          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                INDEX (characterid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

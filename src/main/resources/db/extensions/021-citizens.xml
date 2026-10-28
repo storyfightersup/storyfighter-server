@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter citizens of alliances (user 2026-10-26, server.starter.StoryCitizens, docs/CITIZENS.md).
+         storycitizens: one row per citizenship (hero + alliance = guilds.guildid). playms = the hero's own online ms
+                        toward the next payment; nextfee = the price of the next payment; paidtotal = all fees paid so far.
+                        ended 0 = active; 1 = removed by the leader / 2 = the alliance ended while the hero was offline
+                        (the row stays until the hero's next login shows the message; alliancename is the name for it).
+         storyalliance.citizenfee: the alliance's fee per game day (0 = free; new alliances start at 0).
+         Rows of deleted heroes are removed at server start; rows of ended alliances get ended = 2 then.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-021-story-citizens" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storycitizens"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storycitizens
+            (
+                world        INT         NOT NULL DEFAULT 0,
+                charid       INT         NOT NULL,
+                guildid      INT         NOT NULL,
+                joinedat     BIGINT      NOT NULL DEFAULT 0,
+                playms       BIGINT      NOT NULL DEFAULT 0,
+                nextfee      INT         NOT NULL DEFAULT 0,
+                paidtotal    BIGINT      NOT NULL DEFAULT 0,
+                alliancename VARCHAR(45) NOT NULL DEFAULT '',
+                ended        TINYINT     NOT NULL DEFAULT 0,
+                PRIMARY KEY (charid, guildid),
+                KEY idx_storycitizens_guild (guildid)
+            );
+        </sql>
+    </changeSet>
+
+    <changeSet id="ext-021-alliance-citizen-fee" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="storyalliance" columnName="citizenfee"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE storyalliance ADD COLUMN citizenfee INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

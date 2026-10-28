@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" name="Cosmic" shutdownHook="disable">
+    <Properties>
+        <Property name="filename">cosmic-log</Property>
+        <Property name="standard-pattern">%d{HH:mm:ss.SSS} [%t] %-5level %logger{2} - %msg%n</Property>
+        <Property name="packet-pattern">%d{HH:mm:ss.SSS} %-15logger{1} - %msg%n</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout>
+                    <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+        </Console>
+
+        <!-- StoryFighter privacy promise (docs/SIGNUP.md, docs/legal/PRIVACY.md): every log file rolls daily into
+             logs/archive and rolled files older than 90 days are deleted. The Delete below runs on each rollover of this
+             busy appender and cleans ALL of logs/ (also chat/trade files and the old logs/yyyy-MM/yyyy-MM-dd/ folders).
+             Pitfall: only names with a date are deleted, so a live file (cosmic-log.log, chat.log ...) is never touched.
+             The server also deletes DB log rows older than 90 days (server.starter.StoryLogCleanup). -->
+        <RollingFile name="File"
+                     fileName="logs/${filename}.log"
+                     filePattern="logs/archive/${filename}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <OnStartupTriggeringPolicy minSize="0"/>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="1000">
+                <Delete basePath="logs" maxDepth="3">
+                    <IfFileName regex=".*-\d{4}-\d{2}-\d{2}.*\.log(\.gz)?"/>
+                    <IfLastModified age="90d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <Console name="PacketConsole" target="SYSTEM_OUT">
+            <PatternLayout>
+                <Pattern>${packet-pattern}</Pattern>
+            </PatternLayout>
+        </Console>
+
+        <RollingFile name="MonitoredPacketFile" fileName="logs/monitored-packets.log" filePattern="logs/archive/monitored-packets-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="100"/>
+        </RollingFile>
+
+        <RollingFile name="TradeFile" fileName="logs/trades.log" filePattern="logs/archive/trades-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="100"/>
+        </RollingFile>
+
+        <RollingFile name="ExpeditionFile" fileName="logs/expeditions.log" filePattern="logs/archive/expeditions-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="100"/>
+        </RollingFile>
+
+        <RollingFile name="ChatFile" fileName="logs/chat.log" filePattern="logs/archive/chat-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="100"/>
+        </RollingFile>
+
+        <RollingFile name="MapleLeafFile" fileName="logs/mapleleaf.log" filePattern="logs/archive/mapleleaf-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <Pattern>${standard-pattern}</Pattern>
+            </PatternLayout>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="100"/>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Root level="trace">
+            <AppenderRef ref="File" level="debug"/>
+            <AppenderRef ref="Console" level="trace"/>
+        </Root>
+
+        <Logger name="net.packet.logging" level="debug" additivity="false">
+            <AppenderRef ref="PacketConsole"/>
+            <AppenderRef ref="File"/>
+        </Logger>
+        <Logger name="net.packet.logging.MonitoredChrLogger" level="info" additivity="false">
+            <AppenderRef ref="MonitoredPacketFile"/>
+        </Logger>
+
+        <Logger name="server.Trade" level="info" additivity="false">
+            <AppenderRef ref="TradeFile"/>
+        </Logger>
+        <Logger name="server.expeditions.Expedition" level="info" additivity="false">
+            <AppenderRef ref="ExpeditionFile"/>
+        </Logger>
+        <Logger name="server.ChatLogger" level="info" additivity="false">
+            <AppenderRef ref="ChatFile"/>
+        </Logger>
+        <Logger name="server.MapleLeafLogger" level="info" additivity="false">
+            <AppenderRef ref="MapleLeafFile"/>
+        </Logger>
+
+        <Logger name="com.zaxxer.hikari" level="info"/>
+        <Logger name="io.netty" level="info"/>
+    </Loggers>
+</Configuration>

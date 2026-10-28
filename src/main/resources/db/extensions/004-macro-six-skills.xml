@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Skill macros hold 6 skills (client.SkillMacro.SKILLS). Our databases got the columns by hand
+         on 2026-10-16, so this only runs where they are missing.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-004-macro-six-skills" author="automaplems">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="skillmacros" columnName="skill4"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE skillmacros
+                ADD COLUMN skill4 INT NOT NULL DEFAULT 0 AFTER skill3,
+                ADD COLUMN skill5 INT NOT NULL DEFAULT 0 AFTER skill4,
+                ADD COLUMN skill6 INT NOT NULL DEFAULT 0 AFTER skill5;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

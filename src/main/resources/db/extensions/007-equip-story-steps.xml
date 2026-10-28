@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter upgrade stones (server.starter.StoryStones): the step history of an item.
+         Bits 0-25: 2 bits per step, the kind of each step in order (0 weapon attack, 1 magic attack,
+         2 weapon defense, 3 magic defense). Bits 26-30: the step count. Default 0 = no steps.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-007-equip-story-steps" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="inventoryequipment" columnName="storysteps"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE inventoryequipment
+                ADD COLUMN storysteps INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

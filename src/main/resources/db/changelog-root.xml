@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <include file="changelog-tables.xml" relativeToChangelogFile="true"/>
+    <!-- StoryFighter 2026-10-27: changelog-data.xml (db/data/1xx-*.sql, old game data + a default admin account) was
+         removed. A fresh database starts with those tables empty (ext 009 empties them on old databases); an old
+         database keeps its DATABASECHANGELOG rows 101-161, which Liquibase ignores once they leave the changelog. -->
+
+    <!-- If you have any additional changesets you would like to run at the end, create an "extensions" directory and put them in there. -->
+    <!-- All changesets will run in alphanumeric order based on their filename. Read Liquibase documentation on "includeAll" for more info. -->
+    <includeAll path="extensions" relativeToChangelogFile="true" errorIfMissingOrEmpty="false"/>
+
+</databaseChangeLog>

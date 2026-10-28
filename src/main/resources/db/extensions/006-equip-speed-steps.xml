@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Speed stone "Attack Speed" steps on a weapon (Equip.speedSteps, 0 to 2). Default 0 so old gear is unchanged.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-006-equip-speed-steps" author="automaplems">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="inventoryequipment" columnName="speedsteps"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE inventoryequipment
+                ADD COLUMN speedsteps INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Reforge Scroll (user 2026-10-24, server.starter.StoryReforge): a full item (+10) goes back to +0
+         and keeps the stats of its upgrades.
+         storykept:   the kept stone steps per kind, 5 bits each (bits 0-4 weapon attack, 5-9 magic attack,
+                      10-14 weapon defense, 15-19 magic defense, 20-24 crit chance, 25-29 crit damage). Steps, not
+                      amounts: StoryStones.fixGear rebuilds the stats at login as base + kept x step + current steps,
+                      the same way it counts the current steps.
+         storyresets: how many times the item was reforged (max reforge_max_resets in content/balance.json).
+         Default 0 = never reforged, so every old item stays the same.
+         The columns go at the end of the table: ItemFactory writes inventoryequipment by position (VALUES DEFAULT, ...).
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-013-equip-story-reforge" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="inventoryequipment" columnName="storykept"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE inventoryequipment
+                ADD COLUMN storykept INT NOT NULL DEFAULT 0,
+                ADD COLUMN storyresets INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

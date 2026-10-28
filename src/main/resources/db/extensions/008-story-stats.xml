@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter stat points (user 2026-10-22, server.starter.StoryStats): how many points each hero spent on
+         each of the 6 stats. Free points are not stored: free = (level - 1) x statPointsPerLevel - all spent, so old
+         heroes get their points with no migration, and a reset only sets the 6 counts to 0.
+         A hero without a row has spent nothing. The row goes away with the character.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-008-story-stats" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storystats"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storystats
+            (
+                characterid INT NOT NULL,
+                watk        INT NOT NULL DEFAULT 0,
+                matk        INT NOT NULL DEFAULT 0,
+                wdef        INT NOT NULL DEFAULT 0,
+                mdef        INT NOT NULL DEFAULT 0,
+                crit        INT NOT NULL DEFAULT 0,
+                critdmg     INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (characterid),
+                FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
+            );
+        </sql>
+    </changeSet>
+
+    <!-- StoryFighter upgrade stones, 6 kinds now (Crit Stone, Fury Stone): the high bit of each step's kind.
+         storysteps (extension 007) keeps the low 2 bits per step; bit n here is step n's 3rd bit
+         (kind = low | high << 2: 0 weapon attack, 1 magic attack, 2 weapon defense, 3 magic defense, 4 crit chance,
+         5 crit damage). Default 0, so every old step keeps its old kind (no data change needed). -->
+    <changeSet id="ext-008-equip-story-steps-high" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="inventoryequipment" columnName="storystepshi"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE inventoryequipment
+                ADD COLUMN storystepshi INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

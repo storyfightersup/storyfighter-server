@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter cities (user 2026-10-26, server.starter.StoryCities, docs/CITIES.md).
+         storycities:       one row per owned town (world + town map id); no row = the city has no owner. Monument HP,
+                            regen and shield are not saved (full HP, not shielded after a restart).
+         storyalliance:     alliance gold bank + Siege level per alliance (guilds.guildid). Nobody takes gold out.
+         storyalliancelog:  every deposit (the window's "top givers" list).
+         Rows of alliances that no longer exist are deleted at server start and when the alliance ends.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-020-story-cities" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storycities"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storycities
+            (
+                world        INT         NOT NULL,
+                townmapid    INT         NOT NULL,
+                allianceid   INT         NOT NULL,
+                alliancename VARCHAR(45) NOT NULL DEFAULT '',
+                since        BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (world, townmapid)
+            );
+        </sql>
+    </changeSet>
+
+    <changeSet id="ext-020-story-alliance" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyalliance"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyalliance
+            (
+                guildid    INT    NOT NULL,
+                gold       BIGINT NOT NULL DEFAULT 0,
+                siegelevel INT    NOT NULL DEFAULT 0,
+                PRIMARY KEY (guildid)
+            );
+        </sql>
+    </changeSet>
+
+    <changeSet id="ext-020-story-alliance-log" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyalliancelog"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyalliancelog
+            (
+                id      BIGINT      NOT NULL AUTO_INCREMENT,
+                guildid INT         NOT NULL,
+                charid  INT         NOT NULL,
+                name    VARCHAR(13) NOT NULL DEFAULT '',
+                gold    BIGINT      NOT NULL DEFAULT 0,
+                at      BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (id),
+                KEY idx_storyalliancelog_guild (guildid, id)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Safe Stone (user 2026-10-25, server.starter.StoryStones): ONE generic Safe Stone 2047010 that
+         raises every base stat of an item (step kind SAFE).
+         storykeptsafe: Safe Stone steps an item kept through Reforge Scrolls (StoryReforge; the other kinds stay in
+                        storykept, which has no room left: 6 kinds x 5 bits). Default 0, so every old item stays the same.
+         The column goes at the end of the table: ItemFactory writes inventoryequipment by position (VALUES DEFAULT, ...).
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-016-equip-story-kept-safe" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="inventoryequipment" columnName="storykeptsafe"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE inventoryequipment
+                ADD COLUMN storykeptsafe INT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+    <!-- The old per-stat Safe stones 2047011-2047015 become the one Safe Stone 2047010, same count, everywhere at once
+         (bag, storage, Trade Center pickup box and listings: all rows of inventoryitems + storytradelisting). Runs once
+         at server start, before anyone logs in, so the login item cleanup (StoryItems) never sees the old ids.
+         Old steps those stones made stay what they were (one stat each). -->
+    <changeSet id="ext-016-safe-stone-merge" author="storyfighter">
+        <sql>
+            UPDATE inventoryitems SET itemid = 2047010 WHERE itemid BETWEEN 2047011 AND 2047015;
+            UPDATE storytradelisting SET itemid = 2047010 WHERE itemid BETWEEN 2047011 AND 2047015;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

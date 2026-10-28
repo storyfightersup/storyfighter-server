@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter collect quests (user 2026-10-25, server.starter.StoryQuests; list in content/quests.json).
+         One row per quest a hero has taken (mobid = the quest's monster). Accept inserts the row, Turn in deletes it
+         before the prize is paid, so a quest can only pay once per accept. The rows go away with the character.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-015-story-quests" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyquests"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyquests
+            (
+                characterid INT    NOT NULL,
+                mobid       INT    NOT NULL,
+                acceptedat  BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (characterid, mobid),
+                FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

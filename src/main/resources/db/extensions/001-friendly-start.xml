@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Accounts never see the old terms-of-use screen. -->
+    <changeSet id="ext-001-tos-default" author="automaplems">
+        <sql>
+            ALTER TABLE accounts ALTER COLUMN tos SET DEFAULT 1;
+            UPDATE accounts SET tos = 1;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<imgdir name="MobSkill.img">
+  <imgdir name="100">
+    <imgdir name="level">
+      <imgdir name="1">
+        <int name="x" value="120"/>
+        <int name="mpCon" value="8"/>
+        <int name="interval" value="25"/>
+        <int name="time" value="12"/>
+      </imgdir>
+    </imgdir>
+  </imgdir>
+</imgdir>

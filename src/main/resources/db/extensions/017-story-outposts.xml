@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Team outposts (user 2026-10-25, server.starter.StoryOutposts, docs/OUTPOSTS.md). One row per held
+         flag: world + map (flags exist on channel 1 only), the holder team (guilds.guildid) and its name at the time it
+         took the flag. No row = the flag is free. Rows of teams that no longer exist are deleted at server start, and a
+         team that ends frees its flags at once (Server.disbandGuild). Running captures are not saved.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-017-story-outposts" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyoutposts"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyoutposts
+            (
+                world    INT         NOT NULL,
+                mapid    INT         NOT NULL,
+                teamid   INT         NOT NULL,
+                teamname VARCHAR(45) NOT NULL DEFAULT '',
+                since    BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (world, mapid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

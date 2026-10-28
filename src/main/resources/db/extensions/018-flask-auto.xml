@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Refill Flask "Auto" fill (user 2026-10-25 / go 2026-10-26, server.starter.StoryFlasks).
+         hpauto / mpauto = 1 while the hero's HP Flask / MP Flask fills itself from fitting potions that enter the bag.
+         Default 0 (off), so every old row and every hero without a row keeps the manual fill only.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-018-flask-auto" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="storyflasks" columnName="hpauto"/>
+            </not>
+        </preConditions>
+        <sql>
+            ALTER TABLE storyflasks
+                ADD COLUMN hpauto TINYINT NOT NULL DEFAULT 0,
+                ADD COLUMN mpauto TINYINT NOT NULL DEFAULT 0;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter (user OK 2026-10-27, docs/LAUNCH.md): remove the upstream seed account 'admin' and its GM hero
+         'Admin' (gm 6). They came from the removed db/data/161-admin-data.sql, whose README password is 'admin':
+         a back door on every database that ever ran the old seed. A fresh database never gets them any more.
+         Only rows of the account named exactly 'admin' (any case) and of heroes ON that account are touched; a real
+         player named 'Admin' on another account stays. Safe on a database without the account (every DELETE then
+         matches nothing).
+         Same clean-up as Character.deleteCharFromDB, plus our own per-hero/per-account tables without a foreign key
+         (storycitizens, storybountyclaims, storybountydebt). Tables with ON DELETE CASCADE to characters/accounts
+         (skills, the old card table, famelog, characterexplogs, family_character, quickslotkeymapped, storystats, storygifts,
+         storypetpickup, storyflasks, storyquests) clean themselves; skills, the card table and famelog are deleted by hand too.
+         Left alone on purpose (like a normal hero delete): Trade Center rows (items/gold of other players must never
+         vanish), storybounties/storybountyposts (StoryBounty refunds posters of a deleted target at start),
+         storypetpickuplog + storyalliancelog (logs). The seed hero never logged in on the test DB or StoryBox
+         (lastlogin NULL, checked 2026-10-27), so those tables hold nothing of it.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-023-remove-seed-admin" author="storyfighter" runOnChange="false">
+        <sql>
+            DELETE FROM rings WHERE id > -1 AND id IN (
+                SELECT ringid FROM inventoryequipment WHERE inventoryitemid IN (
+                    SELECT inventoryitemid FROM inventoryitems
+                    WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                       OR accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin')));
+            DELETE FROM pets WHERE petid IN (
+                SELECT petid FROM inventoryitems
+                WHERE petid > -1
+                  AND (characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                       OR accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin')));
+            DELETE FROM inventoryequipment WHERE inventoryitemid IN (
+                SELECT inventoryitemid FROM inventoryitems
+                WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                   OR accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin'));
+            DELETE FROM inventoryitems
+                WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                   OR accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin');
+            DELETE FROM inventorymerchant WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+
+            DELETE FROM keymap WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM skills WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM skillmacros WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM cooldowns WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM queststatus WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM questprogress WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM medalmaps WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM eventstats WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM area_info WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM savedlocations WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM trocklocations WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM playerdiseases WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM buddies
+                WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                   OR buddyid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM famelog
+                WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                   OR characterid_to IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM wishlists WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM monsterbook WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM family_entitlement WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM family_character WHERE cid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM fredstorage WHERE cid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM mts_cart WHERE cid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM namechanges WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM worldtransfers WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM bosslog_daily WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM bosslog_weekly WHERE characterid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM storycitizens WHERE charid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+            DELETE FROM storybountyclaims
+                WHERE holderid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin')
+                   OR targetid IN (SELECT c.id FROM characters c JOIN accounts a ON a.id = c.accountid WHERE LOWER(a.`name`) = 'admin');
+
+            DELETE FROM storages WHERE accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin');
+            DELETE FROM hwidaccounts WHERE accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin');
+            DELETE FROM storybountydebt WHERE accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin');
+
+            DELETE FROM characters WHERE accountid IN (SELECT id FROM accounts WHERE LOWER(`name`) = 'admin');
+            DELETE FROM accounts WHERE LOWER(`name`) = 'admin';
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter (user OK 2026-10-23, prepare for publish): empty the tables that db/data/1xx-*.sql fill with
+         old game data. The tables stay (the old code still queries them and simply finds nothing).
+         Our game gets its drops, gold and shops from our own content instead (server.starter.StoryContent:
+         Mob.wz info/storyDrops + storyGold, Etc.wz/StoryShops.img), and MapleMap.dropFromMonster no longer reads
+         drop_data / drop_data_global while Slice.ON.
+         Not touched: player tables (accounts, characters, inventory ...) and the empty runtime tables
+         (playernpcs, nxcode). The seed files themselves still run on a fresh database first: see docs/LAUNCH.md.
+         Pitfall: never edit db/tables/*.sql or db/data/*.sql, Liquibase checks their checksums. -->
+    <changeSet id="ext-009-empty-nexon-data" author="storyfighter">
+        <sql>
+            DELETE FROM drop_data;
+            DELETE FROM drop_data_global;
+            DELETE FROM reactordrops;
+            DELETE FROM shopitems;
+            DELETE FROM shops;
+            DELETE FROM monstercarddata;
+            DELETE FROM makercreatedata;
+            DELETE FROM makerrecipedata;
+            DELETE FROM makerrewarddata;
+            DELETE FROM makerreagentdata;
+            DELETE FROM specialcashitems;
+            DELETE FROM nxcoupons;
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

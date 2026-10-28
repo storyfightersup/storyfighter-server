@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Trade Center (user 2026-10-23, server.starter.TradeCenter, docs/TRADE-CENTER.md).
+         Items never live in these tables: a listed item is a normal inventoryitems (+ inventoryequipment) row with
+         type 10 (ItemFactory.STORY_TRADE) and characterid = MINUS the listing id; an item in a pickup box is a row with
+         type 11 (ItemFactory.STORY_BOX) and characterid = MINUS the box entry id (negative, so code that deletes a
+         hero's items by characterid alone can never hit a market item). Moving an item between them is one
+         UPDATE of type + characterid, so upgrade steps and stats always travel with the item.
+         Held bid gold lives only in storytradebid.amount (it already left the bidder's characters.meso).
+         No foreign keys on purpose: gold and items must never vanish with a deleted row (a deleted hero's box
+         entries just stay unclaimed). -->
+    <changeSet id="ext-010-trade-center" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storytradelisting"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storytradelisting
+            (
+                id       INT     NOT NULL AUTO_INCREMENT,
+                world    INT     NOT NULL DEFAULT 0,
+                sellerid INT     NOT NULL,
+                kind     TINYINT NOT NULL DEFAULT 0,
+                itemid   INT     NOT NULL,
+                quantity INT     NOT NULL DEFAULT 1,
+                price    INT     NOT NULL,
+                created  BIGINT  NOT NULL DEFAULT 0,
+                endtime  BIGINT  NOT NULL DEFAULT 0,
+                PRIMARY KEY (id),
+                KEY seller (sellerid),
+                KEY ending (kind, endtime)
+            );
+
+            CREATE TABLE storytradebid
+            (
+                id        INT    NOT NULL AUTO_INCREMENT,
+                listingid INT    NOT NULL,
+                bidderid  INT    NOT NULL,
+                amount    INT    NOT NULL,
+                time      BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (id),
+                UNIQUE KEY onebid (listingid, bidderid),
+                KEY bidder (bidderid)
+            );
+
+            CREATE TABLE storytradebox
+            (
+                id          INT         NOT NULL AUTO_INCREMENT,
+                characterid INT         NOT NULL,
+                gold        INT         NOT NULL DEFAULT 0,
+                hasitem     TINYINT     NOT NULL DEFAULT 0,
+                note        VARCHAR(80) NOT NULL DEFAULT '',
+                created     BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (id),
+                KEY owner (characterid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

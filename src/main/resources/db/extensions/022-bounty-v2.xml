@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Bounty v2 (user 2026-10-27, docs/BOUNTY-V2.md, contract docs/BOUNTY.md).
+         storybountyclaims: Victim's Claims. A PvP kill gives the victim (holderid) a Claim on the killer (targetid)
+         until expiresat (ms, bountyClaimDays); only a holder can OPEN a bounty on the target, which uses the Claim up
+         (row deleted). A new kill renews it. Expired rows are deleted by server.starter.StoryBounty (start + clean-up).
+         storybountydebt: one row per ACCOUNT in debt (a collected bounty puts bountyDebtPercent % on the target's
+         account; server.starter.StoryDebt). gold 0 = row deleted. Saved with the hero's gold (Character.saveCharToDB).
+         No foreign keys on purpose (like ext 019): StoryBounty skips claims whose target hero no longer exists.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-022-bounty-claims" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storybountyclaims"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storybountyclaims
+            (
+                holderid INT    NOT NULL,
+                targetid INT    NOT NULL,
+                expiresat BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (holderid, targetid),
+                KEY target (targetid)
+            );
+        </sql>
+    </changeSet>
+
+    <changeSet id="ext-022-bounty-debt" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storybountydebt"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storybountydebt
+            (
+                accountid INT    NOT NULL,
+                gold      BIGINT NOT NULL DEFAULT 0,
+                updatedat BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (accountid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

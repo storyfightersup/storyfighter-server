@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter bounties + Wanted Board (user 2026-10-26, server.starter.StoryBounty, contract docs/BOUNTY.md).
+         storybounties: one row per wanted (or just closed) hero. state 0 open / 1 collected / 2 bought out; stamp = the
+         word on the closed poster ('' while open); lastseenat 0 = never spotted; safeuntil = no new bounty before this
+         (after a collect). Closed rows are deleted after the stamp time and the safe time.
+         storybountyposts: who put how much in (for buy-off refunds into the Trade Center pickup box; never sent to a
+         client: posts are anonymous). Deleted when the bounty closes.
+         No foreign keys on purpose: when a target hero is deleted, StoryBounty refunds the posters at the next start.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-019-bounties" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storybounties"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storybounties
+            (
+                targetid    INT         NOT NULL,
+                gold        BIGINT      NOT NULL DEFAULT 0,
+                lastseenmap INT         NOT NULL DEFAULT 0,
+                lastseenat  BIGINT      NOT NULL DEFAULT 0,
+                createdat   BIGINT      NOT NULL DEFAULT 0,
+                state       TINYINT     NOT NULL DEFAULT 0,
+                stamp       VARCHAR(20) NOT NULL DEFAULT '',
+                closedat    BIGINT      NOT NULL DEFAULT 0,
+                safeuntil   BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (targetid)
+            );
+            CREATE TABLE storybountyposts
+            (
+                id       INT    NOT NULL AUTO_INCREMENT,
+                targetid INT    NOT NULL,
+                posterid INT    NOT NULL,
+                gold     BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (id),
+                KEY target (targetid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

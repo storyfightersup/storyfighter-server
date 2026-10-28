@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Friendly game: everyone has the infinite Power Elixir and every ammo type,
+         so shops no longer sell potions, healing food (200-202xxxx) or ammo (206/207/233xxxx). -->
+    <changeSet id="ext-002-no-potion-or-ammo-shops" author="automaplems">
+        <sql>
+            DELETE FROM shopitems WHERE itemid DIV 10000 IN (200, 201, 202, 206, 207, 233);
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

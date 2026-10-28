@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter test gifts (user 2026-10-24, server.starter.StoryGifts; list in content/gifts.json).
+         One row per gift id a hero has received (written at login in the same transaction as the hero's bag),
+         so every hero gets each gift exactly once. The rows go away with the character.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-014-story-gifts" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storygifts"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storygifts
+            (
+                characterid INT         NOT NULL,
+                giftid      VARCHAR(64) NOT NULL,
+                receivedat  BIGINT      NOT NULL DEFAULT 0,
+                PRIMARY KEY (characterid, giftid),
+                FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

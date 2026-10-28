@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter Refill Flasks (user 2026-10-24, server.starter.StoryFlasks). The server is the authority.
+         hpbank / mpbank = HP / MP points poured into the hero's HP Flask / MP Flask (at most flask_cap in
+         content/balance.json). Written on every fill and every use. A hero without a row has two empty banks.
+         The row goes away with the character.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-012-story-flasks" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyflasks"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyflasks
+            (
+                characterid INT    NOT NULL,
+                hpbank      BIGINT NOT NULL DEFAULT 0,
+                mpbank      BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (characterid),
+                FOREIGN KEY (characterid) REFERENCES characters (id) ON DELETE CASCADE
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>
