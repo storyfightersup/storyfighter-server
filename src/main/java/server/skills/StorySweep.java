@@ -75,6 +75,9 @@ public final class StorySweep {
         final List<Set<Integer>> unitsDone = List.of(new HashSet<>(), new HashSet<>(), new HashSet<>());
         ScheduledFuture<?> task;
         int hits;
+        int skillId;
+        int crush;          // Dome Breaker (lv 60 passive, 2026-10-28): % to break each enemy Dome / Snap Trap in the swing
+        boolean crushed;    // rolled once per swing, when the head has swept across both sides
 
         Run(Character chr, MapleMap map, Point from, int dir, int range, int percent, int out, int across, int back) {
             this.chr = chr;
@@ -117,6 +120,8 @@ public final class StorySweep {
         // to the others; the caster's own client draws its swing at the release (the same numbers)
         map.broadcastMessage(chr, sweepPacket(chr.getId(), skillId, charge, from, toleft, range, out, across, back), false);
         Run run = new Run(chr, map, from, dir, range, percent, out, across, back);
+        run.skillId = skillId;
+        run.crush = Math.max(0, Math.min(100, StorySkills.passive(chr, "sweepCrush")));
         log.info("story sweep {} skill {} lv {}: {} ms charge (of {}), rope {} px, {}% per pass, from {},{} facing {}", chr.getName(),
                 skillId, level, charge, max, range, percent, from.x, from.y, toleft ? "left" : "right");
         run.task = TimerManager.getInstance().register(() -> step(run), STEP_MS, STEP_MS);
@@ -143,6 +148,10 @@ public final class StorySweep {
                     sweepBand(run, pass, (int) Math.floor(Math.min(xa, xb)) - HEAD, (int) Math.ceil(Math.max(xa, xb)) + HEAD);
                 }
                 run.lastT = t;
+                if (!run.crushed && t >= edges[2]) {   // out + across done: the head has swept the whole rope, both sides
+                    run.crushed = true;
+                    crush(run);
+                }
             }
             if (over) {
                 run.task.cancel(false);
@@ -182,8 +191,10 @@ public final class StorySweep {
             }
             int dealt = StoryZones.hitPlayer(chr, other, run.percent, false);
             run.hits++;
+            // "Wounded" (user 2026-10-28): a pass that hits stops potions for a moment (StoryWound.MIN_BLOCK_MS)
+            StoryWound.block(chr, other, run.skillId, StoryWound.MIN_BLOCK_MS, "hammer sweep pass " + (pass + 1));
             if (pass == 2 && dealt > 0) {
-                pullPlayer(chr, other);
+                pullPlayer(chr, other, run.skillId);
             }
         }
         run.hits += StoryUnits.sweep(chr, run.from.x + lo, run.from.x + hi, run.from.y - UP, run.from.y + DOWN, run.percent,
@@ -194,7 +205,7 @@ public final class StorySweep {
     //     hand) every enemy the head hits is dragged toward the caster, to sweepPull px in front of them on its own side.
     //     Monsters: a knock-back SPEED toward the caster (the caster's client gets control and runs the normal mob physics,
     //     like Blast Arrow's push: it may slide off a platform's end and fall; never a direct spot), kind 30 to the caster.
-    //     Players: pulled onto the caster's platform like Chain (StoryAttacks.moveVictim: their own client places them).
+    //     Players: pulled onto the caster's platform like Chain (StoryAttacks.moveVictim: a STORY_SLIDE every screen draws).
     //     Bosses are not pulled. Never across a Dome's wall: the end spot is kept on the target's side of every wall.
     // Related down: OpenStory StoryZones (kind 30 -> MapMobs::knock), StoryPush (landing log)
     private static void pullMonster(Character chr, Monster monster) {
@@ -213,10 +224,11 @@ public final class StorySweep {
         }
         monster.aggroSwitchController(chr, true);
         StoryPush.start(monster, distance, chr.getName() + " (Sweep Pull)");
+        server.anticheat.MobMoveCheck.knock(monster, dir, distance, "sweep pull by " + chr.getName());   // anti-cheat #23
         chr.sendPacket(pullPacket(monster.getObjectId(), dir, distance));
     }
 
-    private static void pullPlayer(Character chr, Character victim) {
+    private static void pullPlayer(Character chr, Character victim, int skillId) {
         int gap = StorySkills.passive(chr, "sweepPull");
         if (gap <= 0 || !victim.isAlive() || victim.pvpShielded() || server.starter.StoryParty.allies(chr, victim)) {
             return;
@@ -226,8 +238,21 @@ public final class StorySweep {
         if (Math.abs(victim.getPosition().x - me.x) <= gap + 10) {
             return;
         }
-        StoryAttacks.moveVictim(victim, me, new Point(me.x + side * gap, me.y));
+        int slide = StoryAttacks.moveVictim(victim, me, new Point(me.x + side * gap, me.y), true);
+        StoryWound.block(chr, victim, skillId, slide, "sweep pull");   // no potions while dragged (at least 1 s)
         log.info("story sweep pull {}: dragged {} toward the caster", chr.getName(), victim.getName());
+    }
+
+    // --- Dome Breaker (lv 60 sword passive, user 2026-10-28): each enemy Dome / Snap Trap within the rope breaks at crush %
+    //     (one roll per swing; StoryDome / StoryTraps.crushNear, the same rule as Quake Hammer's first landing) (one line)
+    // Pitfall: crushNear's up / down room is the range too, so a Dome on a platform within the rope's length above counts.
+    private static void crush(Run run) {
+        if (run.crush <= 0) {
+            return;
+        }
+        int domes = StoryDome.crushNear(run.chr, run.from, run.range, run.crush);
+        int traps = StoryTraps.crushNear(run.chr, run.from, run.range, run.crush);
+        log.info("story sweep {}: Dome Breaker {}%: broke {} Domes and {} traps", run.chr.getName(), run.crush, domes, traps);
     }
 
     // kind 30: int monster object id, byte dir (-1 left, 1 right), short distance px (the caster's client knocks it)

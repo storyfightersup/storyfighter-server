@@ -61,7 +61,7 @@ public final class PvpHits {
         if (victim.pvpShielded()) {
             int direction = attacker.getPosition().x <= victim.getPosition().x ? 1 : 0;
             // Skill byte -2: the client draws the word "shield". Damage stays 0, so there is no knockback and no HP loss.
-            map.broadcastMessage(victim, PacketCreator.damagePlayer(-2, attacker.getId(), victim.getId(), 0, 0, direction, false, 0, false, 0, 0, 0), true);
+            map.broadcastMessage(victim, PacketCreator.damagePlayerByHero(-2, attacker.getId(), victim.getId(), 0, direction), true);   // + who hit (auto-play, Chain)
             return 0;
         }
         // Anti-cheat #18: a player's hit landed; quitting the game in the next seconds keeps the body on the map
@@ -101,7 +101,8 @@ public final class PvpHits {
         if (!victim.isAlive()) {
             return 0;
         }
-        map.broadcastMessage(victim, PacketCreator.damagePlayer(crit ? -5 : 0, attacker.getId(), victim.getId(), shown, 0, direction, false, 0, false, 0, 0, 0), true);
+        // the tail names the attacker: the victim's auto-play fights back only against them, Chain aims at them first
+        map.broadcastMessage(victim, PacketCreator.damagePlayerByHero(crit ? -5 : 0, attacker.getId(), victim.getId(), shown, direction), true);
         int lost = Math.min(Math.max(0, hpLoss), victim.getHp());
         // StoryFighter Dome life drain: the caster heals from the hit (only inside their own Dome, StoryDome.drain)
         StoryDome.drain(attacker, map, false, victim.getId(), shown);

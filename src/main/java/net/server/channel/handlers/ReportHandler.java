@@ -27,11 +27,11 @@ import net.packet.InPacket;
 import server.moderation.StoryReports;
 
 /*
- * StoryFighter (docs/MODERATION.md "Packets (as built)"): REPORT 0x6A in =
+ * StoryFighter (docs/MODERATION.md "Packets (as built)"): REPORT 0x174 in =
  *   byte type (0 or 1), string victim, byte reason (0-3), string note, and only when type == 1: string chatlog.
  * The chatlog is read and ignored: the proof is taken by the server (server.moderation.StoryChat).
  * Reports are free (the old 300 gold cost and "possible reports" counter are gone). Answer: reportResponse(code)
- * on SUE_CHARACTER_RESULT 0x37 (StoryReports codes 0-4).
+ * on SUE_CHARACTER_RESULT 0x51C (StoryReports codes 0-4).
  */
 public final class ReportHandler extends AbstractPacketHandler {
     @Override

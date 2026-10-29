@@ -2,6 +2,7 @@ package server.skills;
 
 import client.Character;
 import client.Skill;
+import client.SkillFactory;
 import server.TimerManager;
 import server.life.Monster;
 import server.maps.MapleMap;
@@ -28,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * and bounces skyBounces times after the landing: bounce k lands k x bounceStep px farther ahead, bounceTime ms after the
  * one before, on the real floor there (StoryPlace.land), and makes a smaller shock: bounceDamage1/2 % of the landing's
  * damage within bounceRange1/2 % of its range. Only the first landing can break Domes and traps.
+ * Dome Breaker (lv 60 passive, 2026-10-28): the first landing's crush chance is crushProp + crushPlus % (50 -> 75).
+ * "Wounded" (2026-10-28, StoryWound): an enemy hero a shock (landing or bounce) hits cannot drink for the bounce's time
+ * in the air (StoryWound.airMs of "bounce" px, at least StoryWound.MIN_BLOCK_MS).
  * Pitfall:      a press older than STALE_MS without a release counts as no charge (lag or an edited client).
  */
 public final class StoryHammer {
@@ -77,8 +81,15 @@ public final class StoryHammer {
         int low = StorySkills.value(skillId, level, "quakeLow");
         int high = StorySkills.value(skillId, level, "quakeHigh");
         int percent = (int) Math.round(low + (high - low) * f);
-        int crush = StorySkills.value(skillId, level, "crushProp");
+        // Dome Breaker (lv 60 sword passive, user 2026-10-28): + crushPlus % on the first landing (50 -> 75)
+        int crush = Math.min(100, StorySkills.value(skillId, level, "crushProp") + StorySkills.passive(chr, "crushPlus"));
+        // "Wounded" (user 2026-10-28): an enemy hero the shock hits cannot drink while the bounce keeps them in the air
+        int airMs = StoryWound.airMs(StorySkills.value(skillId, level, "bounce"));
         int slamMs = Math.max(0, StorySkills.value(skillId, level, "slamTime"));
+        // Stun (user 2026-10-29): every enemy the shock damages, quakeStunMin ms (no charge) -> quakeStunMax ms (full)
+        int stunMin = Math.max(0, StorySkills.value(skillId, level, "quakeStunMin"));
+        int stunMax = Math.max(stunMin, StorySkills.value(skillId, level, "quakeStunMax"));
+        int stunMs = (int) Math.round(stunMin + (stunMax - stunMin) * f);
 
         MapleMap map = chr.getMap();
         Point from = new Point(chr.getPosition());
@@ -94,6 +105,7 @@ public final class StoryHammer {
         java.util.List<Point> spots = new ArrayList<>();
         java.util.List<Integer> ranges = new ArrayList<>();
         java.util.List<Integer> percents = new ArrayList<>();
+        java.util.List<Integer> stuns = new ArrayList<>();
         Point last = slam;
         for (int k = 1; k <= bounces; k++) {
             Point target = new Point(slam.x + (toleft ? -step : step) * k, last.y - 30);
@@ -101,23 +113,30 @@ public final class StoryHammer {
             Point spot = landing.fh() == 0 ? new Point(last) : landing.spot();
             spots.add(spot);
             ranges.add(Math.max(30, range * StorySkills.passive(chr, "bounceRange" + k) / 100));
-            percents.add(Math.max(1, percent * StorySkills.passive(chr, "bounceDamage" + k) / 100));
+            int share = StorySkills.passive(chr, "bounceDamage" + k);
+            percents.add(Math.max(1, percent * share / 100));
+            stuns.add(Math.max(0, stunMs * share / 100));   // a bounce stuns by its damage share (45% / 20% of the landing's)
             last = spot;
         }
         // to everyone, the caster too: its own client draws the arc at once and takes the bounce spots from here
         map.broadcastMessage(StoryZones.slamPacket(chr.getId(), skillId, charge, from, slam, range, height, spots, ranges));
-        TimerManager.getInstance().schedule(() -> shock(chr, map, slam, range, percent, crush), slamMs);
+        log.info("story hammer {}: stun {} ms on every enemy the landing hurts", chr.getName(), stunMs);
+        TimerManager.getInstance().schedule(() -> shock(chr, map, slam, range, percent, crush, skillId, airMs, stunMs), slamMs);
         for (int k = 0; k < spots.size(); k++) {
             Point spot = spots.get(k);
             int r = ranges.get(k);
             int pct = percents.get(k);
-            log.info("story hammer {}: bounce {} at {},{}: {}% in {} px", chr.getName(), k + 1, spot.x, spot.y, pct, r);
-            TimerManager.getInstance().schedule(() -> shock(chr, map, spot, r, pct, 0), slamMs + (long) gap * (k + 1));
+            int stun = stuns.get(k);
+            log.info("story hammer {}: bounce {} at {},{}: {}% in {} px, stun {} ms", chr.getName(), k + 1, spot.x, spot.y, pct, r, stun);
+            TimerManager.getInstance().schedule(() -> shock(chr, map, spot, r, pct, 0, skillId, airMs, stun), slamMs + (long) gap * (k + 1));
         }
     }
 
-    // --- The hammer lands: damage to enemies in range, a chance to break enemy Domes and traps (one line)
-    private static void shock(Character chr, MapleMap map, Point slam, int range, int percent, int crush) {
+    // --- The hammer lands: damage to enemies in range, a stun on each one it hurts, a chance to break enemy Domes and traps
+    // Stun (user 2026-10-29): stunMs on every monster / enemy hero that took damage (> 0); a boss half as long; a hero
+    // planted with Anchor Blade is never stunned (Character.giveDebuff -> StoryAnchor.immune). Seen by all as the normal stun.
+    private static void shock(Character chr, MapleMap map, Point slam, int range, int percent, int crush, int skillId, int airMs,
+                              int stunMs) {
         try {
             if (chr.getMap() != map || !chr.isAlive()) {
                 log.info("story hammer {}: no shock (left the map or died)", chr.getName());
@@ -131,7 +150,10 @@ public final class StoryHammer {
                         || StoryDome.blocks(chr, monster)) {
                     continue;
                 }
-                StoryZones.hitMonster(chr, monster, percent, false, "quake hammer");
+                int dealt = StoryZones.hitMonster(chr, monster, percent, false, "quake hammer");
+                if (dealt > 0 && stunMs > 0 && monster.isAlive() && !server.starter.StoryCities.isMonument(monster)) {
+                    monster.stunFor(SkillFactory.getSkill(skillId), monster.isBoss() ? stunMs / 2 : stunMs);   // a boss: half
+                }
                 mobs++;
             }
             int heroes = 0;
@@ -141,7 +163,13 @@ public final class StoryHammer {
                         || Math.abs(at.x - slam.x) > range || Math.abs(at.y - slam.y) > vertical) {
                     continue;
                 }
-                StoryZones.hitPlayer(chr, other, percent, false);
+                int dealt = StoryZones.hitPlayer(chr, other, percent, false);
+                if (dealt > 0) {
+                    StoryZones.stunPlayer(other, stunMs);   // Anchor Blade's immunity is checked in giveDebuff
+                }
+                if (other.isAlive() && !other.pvpShielded() && !StoryDome.blocks(chr, other)) {
+                    StoryWound.block(chr, other, skillId, airMs, "quake hammer bounce");   // at least 1 s (StoryWound)
+                }
                 heroes++;
             }
             int units = StoryUnits.hammer(chr, slam, range, vertical, percent);   // enemy Arrow Sentries / Mirror Twins

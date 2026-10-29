@@ -50,7 +50,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * the holder bonus (integer, rounded down). Other citizenships don't count here.
  * Holders are saved in table storyoutposts (db ext 017); a team that ends frees its flags (Server.disbandGuild).
  *
- * Packet out: STORY_OUTPOST (0x1A8), see writeTo. Sent to an arriving hero on every map enter (count 0 when the map
+ * Packet out: STORY_OUTPOST (0x512), see writeTo. Sent to an arriving hero on every map enter (count 0 when the map
  * has no flag here) and to the whole map when anything changed, at most once a second.
  *
  * Related up:   Server.init (start), MapleMap.addPlayer (showTo), Monster.giveExpToCharacter (expFactor),
@@ -577,7 +577,7 @@ public final class StoryOutposts {
         return "Alliance " + g.getName() + " holds this outpost now.";
     }
 
-    // ================================================================ packet (STORY_OUTPOST 0x1A8)
+    // ================================================================ packet (STORY_OUTPOST 0x512)
 
     /**
      * byte count; per flag: int outpostId (map id), short x, short y, short radius, int holderTeamId (0 free),

@@ -38,6 +38,7 @@ public final class MovePlayerHandler extends AbstractMovementPacketHandler {
             if (!server.anticheat.MoveCheck.check(c.getPlayer(), before, c.getPlayer().getPosition())) {
                 return;
             }
+            server.skills.MovementSkills.onMove(c.getPlayer());   // on a floor again: movement skill uses per jump reset
             server.skills.StoryDome.keepPlayer(c.getPlayer());   // a Dome's members stay in, others stay out
             server.skills.StoryLeash.onMove(c.getPlayer());   // Iron Leash: the enemy may drag the Anchor Blade sword along
             server.skills.StoryAnchor.keepPlayer(c.getPlayer());   // Anchor Blade: the rope holds the hero

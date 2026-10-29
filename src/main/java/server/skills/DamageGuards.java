@@ -30,6 +30,10 @@ public final class DamageGuards {
     // Order:        Iron Guard / Combo Barrier + Anchor Blade cut first (capped), the Anchor shield, the Mirror Twins
     //               share, then Power Guard, then Meso Guard on what is left.
     //               Magic Guard skips the meso spend.
+    //               Anchor Blade 2026-10-29: cut 10% -> 20% (content/skills/skills.json); its stun / freeze / slow
+    //               immunity is not a damage step (StoryAnchor.immune). The shield (absorb) stays (user 2026-10-29): what
+    //               it soaks goes to the map in its kind 13 packet (before this hit's DAMAGE_PLAYER); every client draws it
+    //               as a blue number and draws no MISS for a 0 that follows it (OpenStory Char::take_shield_soak).
     // Pitfall:      the bounced hit must be applied with addHP, never through this method again, or two guards loop.
     //               absorbToMp spends the MP. The caller must subtract only the HP it returns, or the MP is paid twice.
     // reflectCap:   monster bounce stops at max HP / 10. Pass 0 for a player, the hit itself is the cap.

@@ -21,8 +21,11 @@ import server.TimerManager;
  * What a StoryFighter attack does to monsters after its damage (numbers from content/skills/skills.json).
  * Twin Slash: two lines per target (attackCount 2, each cut by StoryDamage.maxLine); the stun is rolled here
  * (prop % on monsters, bossProp % on bosses and players, stunTime ms). No pull (user 2026-10-21).
- * Blast Arrow: the client knocks the targets back (push = slide px; they may fall off a platform, StoryPush logs
- * the landing); the explosion is worked out here, on the server:
+ * Blast Arrow: the targets are knocked back (push = slide px; they may fall off a platform, StoryPush logs the
+ * landing) by a chance, pushProp % (user 2026-10-28: 30% -> 70%), rolled here: a pushed monster is knocked by this
+ * client after the roll (STORY_SKILL_FX kind 30, the Sweep Pull packet), a pushed player through moveVictim; Firm Footing
+ * (sword passive) may keep a player standing (knockIgnore %, keepsFooting). Without pushProp the client knocks every target itself.
+ * The explosion is worked out here, on the server:
  * every other monster within blastRadius of a hit takes that hit's damage, 100% at the centre down to
  * blastEdge % at the edge. Frost Field: ticks hits in all (the cast is the first), one every tickTime ms,
  * and the monster walks slow% slower meanwhile. Bosses are not pushed, and are stunned at bossProp %
@@ -40,33 +43,55 @@ public final class StoryAttacks {
     private StoryAttacks() {
     }
 
-    // --- Chain / Sniper Shot: may this monster take the one-target hit? Logs the check for the tester (one line)
+    // --- May this monster take this story attack's hit? (box skills + Chain / Sniper Shot / Ice Lance) Logs every check (one line)
     // Related up:   AbstractDealDamageHandler, before each monster's damage
-    // Related down: StorySkills.inReach (attackReach + slack), OpenStory Combat::pick_story_target (the client's pick)
+    // Related down: StorySkills.boxGap + MobBodies (box vs body), OpenStory Combat::find_closest / pick_story_target
     // Pitfall:      server spots lag the client's, so a farther monster only refuses the hit when it is AIM_SLACK px
     //               farther, near the hero's height (|dy| <= 100) and well inside the reach: the client surely saw it.
     private static final int AIM_SLACK = 60;
 
-    public static boolean aimAllows(Character chr, int skillId, Monster monster) {
+    // Anti-cheat #22 (docs/ANTICHEAT.md, 2026-10-28): the same test as the client. The skill's box from skills.json,
+    // on the side the hero faced (the attack packet's direction byte = the client's attack.toleft), must touch the
+    // monster's BODY box (MobBodies = the frame lt/rb the client uses), with hitbox_lag_px of room for the spots that
+    // moved during ping. Before, the server tested only the monster's feet, so a tall or big monster (a boss, a Wisp
+    // over a lower platform) that the client honestly hit was refused: "the game doesn't react".
+    // toleftByte: AttackInfo.direction (1 = faced left, 0 = faced right, anything else = both sides)
+    public static boolean aimAllows(Character chr, int skillId, Monster monster, int toleftByte) {
         StorySkills.Info info = StorySkills.isStory(skillId) ? StorySkills.get(skillId) : null;
         Point at = monster.getPosition();
         if (info == null) {
             return StorySkills.inReach(chr, skillId, at);
         }
-        if (info.aim().isEmpty()) {
-            // Twin Slash, Blast Arrow, Frost Field: the hit box from skills.json (StorySkills.inBox), logged per target
-            Point from = chr.getPosition();
-            boolean ok = StorySkills.inReach(chr, skillId, at) && StorySkills.inBox(chr, skillId, at);
-            log.info("story box {} skill {} target {} dx {} dy {}: {}", chr.getName(), skillId, monster.getObjectId(),
-                    at.x - from.x, at.y - from.y, ok ? "hit" : "refused (out of box)");
-            return ok;
+        if ("chain".equals(info.aim())) {   // any direction (user 2026-10-28): not the facing's box
+            String refused = chainRefusal(chr, skillId, at, MobBodies.of(monster.getId()), StorySkills.hitboxLagPx());
+            int[] dir = chainDir(chr);
+            log.info("story aim {} map {} skill {} (chain{}) target {} mob {} dx {} dy {}: {}", chr.getName(), chr.getMapId(),
+                    skillId, dir[0] == 0 && dir[1] == 0 ? "" : ", held " + dir[0] + "," + dir[1], monster.getObjectId(),
+                    monster.getId(), at.x - chr.getPosition().x, at.y - chr.getPosition().y,
+                    refused == null ? "accepted" : "refused (" + refused + ")");
+            return refused == null;
         }
         Point from = chr.getPosition();
+        int facing = toleftByte == 1 ? -1 : toleftByte == 0 ? 1 : 0;
+        java.awt.Rectangle body = MobBodies.of(monster.getId());
+        int gap = StorySkills.boxGap(chr, skillId, at, body, facing);
+        int lag = StorySkills.hitboxLagPx();
+        // no box in the data: the old reach rule (attackReach + slack)
+        boolean inside = gap < 0 ? StorySkills.inReach(chr, skillId, at) : gap <= lag;
+        if (info.aim().isEmpty()) {
+            // Twin Slash, Blast Arrow, Frost Field: logged per target (grep "story box" in the server log)
+            log.info("story box {} map {} skill {} target {} mob {} dx {} dy {} face {} body {}..{} x {}..{}: {} (gap {} px, room {})",
+                    chr.getName(), chr.getMapId(), skillId, monster.getObjectId(), monster.getId(), at.x - from.x, at.y - from.y,
+                    facing < 0 ? "left" : facing > 0 ? "right" : "both", body.x, body.x + body.width, body.y, body.y + body.height,
+                    inside ? "hit" : "refused (out of box)", Math.max(0, gap), lag);
+            return inside;
+        }
         int dist = (int) Math.round(from.distance(at));
 
-        if (!StorySkills.inReach(chr, skillId, at)) {
-            log.info("story aim {} skill {} ({}) target {} dist {} dx {} dy {}: refused (out of reach)",
-                    chr.getName(), skillId, info.aim(), monster.getObjectId(), dist, at.x - from.x, at.y - from.y);
+        if (!inside) {
+            log.info("story aim {} map {} skill {} ({}) target {} mob {} dist {} dx {} dy {} face {}: refused (out of box, gap {} px, room {})",
+                    chr.getName(), chr.getMapId(), skillId, info.aim(), monster.getObjectId(), monster.getId(), dist,
+                    at.x - from.x, at.y - from.y, facing < 0 ? "left" : facing > 0 ? "right" : "both", Math.max(0, gap), lag);
             return false;
         }
         if ("far".equals(info.aim()) && Math.abs(at.x - from.x) >= 30) {
@@ -92,6 +117,136 @@ public final class StoryAttacks {
         log.info("story aim {} skill {} ({}) target {} dist {} dx {} dy {}: accepted",
                 chr.getName(), skillId, info.aim(), monster.getObjectId(), dist, at.x - from.x, at.y - from.y);
         return true;
+    }
+
+    // ================================================================ Chain: any direction (user 2026-10-28)
+    // Anti-cheat #22 note (docs/ANTICHEAT.md): Chain no longer uses the facing box. The target's BODY must be within
+    // attackReach px of the caster's body centre (feet - CHAIN_BODY_Y) in ANY direction, with room px for lag
+    // (hitbox_lag_px on monsters, hitbox_lag_pvp_px on heroes), and the straight line between them must not pass through a
+    // Dome's wall (StoryDome.lineCrossesWall; StoryDome.blocks still checks who stands inside). The client picks the
+    // target (OpenStory Combat::chain_pick: the enemy who hit you last, else the nearest; the first enemy on that line).
+
+    /** The body centre: px above the feet (OpenStory Combat::CHAIN_BODY_Y). */
+    public static final int CHAIN_BODY_Y = 30;
+    /** A hero's body around the feet point (OpenStory Stage: the box monster attacks test, 30 x 60). */
+    public static final java.awt.Rectangle HERO_BODY = new java.awt.Rectangle(-15, -60, 30, 60);
+    /** STORY_SKILL_FX kind 33: where another hero's Chain throw goes (OpenStory StoryZones -> Combat::set_chain_aim). */
+    public static final int FX_CHAIN_AIM = 33;
+
+    public static boolean isChain(int skillId) {
+        StorySkills.Info info = StorySkills.isStory(skillId) ? StorySkills.get(skillId) : null;
+        return info != null && "chain".equals(info.aim());
+    }
+
+    // --- Why this Chain hit is refused (null = allowed): out of reach in every direction, or a Dome wall on the line (one line)
+    // Related up:   aimAllows (monsters), PvpAttackHandler (heroes)
+    // body: the target's box around its feet (MobBodies for a monster, HERO_BODY for a hero); room: px of lag allowed
+    public static String chainRefusal(Character chr, int skillId, Point target, java.awt.Rectangle body, int room) {
+        int reach = StorySkills.value(skillId, Math.max(1, chr.getSkillLevel(skillId)), "attackReach");
+        if (reach <= 0) {
+            reach = 350;
+        }
+        Point from = chr.getPosition();
+        Point centre = new Point(from.x, from.y - CHAIN_BODY_Y);
+        // the body's point nearest the caster's centre
+        int left = target.x + body.x;
+        int top = target.y + body.y;
+        Point near = new Point(Math.max(left, Math.min(centre.x, left + body.width)),
+                Math.max(top, Math.min(centre.y, top + body.height)));
+        int gap = (int) Math.ceil(centre.distance(near)) - reach;
+        if (gap > room) {
+            return "out of reach: " + gap + " px past " + reach + ", room " + room;
+        }
+        if (StoryDome.lineCrossesWall(chr.getMap(), centre, near)) {
+            return "a Dome wall on the line";
+        }
+        return chainOffRay(chr, skillId, centre, target, body, room, reach);
+    }
+
+    // ================================================================ Chain aimed by a held direction (user 2026-10-29)
+    // The player held Left/Right/Up/Down (two keys = diagonal) at a real Chain press: the client throws THAT way and
+    // marks the attack packet's tail 'D' + dir x, dir y (AbstractDealDamageHandler.parseDamage -> noteChainDir). Every
+    // target of that throw (monsters in aimAllows, heroes in the PvP packet right after it) must then lie roughly on
+    // that ray: within the line's half width (half the skill box's height, as OpenStory Combat::chain_pick) + room px of
+    // lag + CHAIN_RAY_SLACK px per px along it (about 10 deg of angle). An empty throw (no target) needs no check: the
+    // packet only carries the picture (FX 33) and pays MP + cooldown like any cast.
+
+    /** A held direction counts this long for the PvP packet that follows its monster packet. */
+    private static final long CHAIN_DIR_MS = 3000;
+    /** Angle slack of the held ray: px of extra width per px along it (tan 10 deg). */
+    private static final double CHAIN_RAY_SLACK = 0.18;
+    /** char id -> { dirX, dirY, time ms } of the last Chain throw (0, 0 = the automatic aim). */
+    private static final Map<Integer, long[]> CHAIN_DIRS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void noteChainDir(Character chr, int dirX, int dirY) {
+        if (dirX == 0 && dirY == 0) {
+            CHAIN_DIRS.remove(chr.getId());
+        } else {
+            CHAIN_DIRS.put(chr.getId(), new long[]{Integer.signum(dirX), Integer.signum(dirY), System.currentTimeMillis()});
+        }
+    }
+
+    /** The held direction of this hero's last Chain throw, { 0, 0 } when automatic or older than CHAIN_DIR_MS. */
+    public static int[] chainDir(Character chr) {
+        long[] d = CHAIN_DIRS.get(chr.getId());
+        if (d == null || System.currentTimeMillis() - d[2] > CHAIN_DIR_MS) {
+            return new int[]{0, 0};
+        }
+        return new int[]{(int) d[0], (int) d[1]};
+    }
+
+    // Why this target is off the held ray (null = on it, or no direction was held). centre: the caster's body centre.
+    private static String chainOffRay(Character chr, int skillId, Point centre, Point target, java.awt.Rectangle body,
+                                      int room, int reach) {
+        int[] dir = chainDir(chr);
+        if (dir[0] == 0 && dir[1] == 0) {
+            return null;
+        }
+        int level = Math.max(1, chr.getSkillLevel(skillId));
+        int ltY = StorySkills.value(skillId, level, "ltY");
+        int rbY = StorySkills.value(skillId, level, "rbY");
+        double half = ltY == 0 && rbY == 0 ? 70.0 : Math.max(20.0, Math.abs(rbY - ltY) / 2.0);
+        double len = Math.hypot(dir[0], dir[1]);
+        double ux = dir[0] / len;
+        double uy = dir[1] / len;
+        double left = target.x + body.x;
+        double top = target.y + body.y;
+        double right = left + body.width;
+        double bottom = top + body.height;
+        // not behind the caster: the body's middle must lie ahead along the ray (room for lag + half the body)
+        double ahead = ((left + right) / 2 - centre.x) * ux + ((top + bottom) / 2 - centre.y) * uy;
+        if (ahead < -(room + Math.max(body.width, body.height) / 2.0)) {
+            return "behind the held way " + dir[0] + "," + dir[1];
+        }
+        double worst = Double.MAX_VALUE;
+        for (double t = 0; t <= reach + room; t += 6) {
+            double px = centre.x + ux * t;
+            double py = centre.y + uy * t;
+            double gx = Math.max(0, Math.max(left - px, px - right));
+            double gy = Math.max(0, Math.max(top - py, py - bottom));
+            double over = Math.hypot(gx, gy) - (half + room + t * CHAIN_RAY_SLACK);
+            if (over <= 0) {
+                return null;
+            }
+            worst = Math.min(worst, over);
+        }
+        return "off the held way " + dir[0] + "," + dir[1] + ": " + (int) Math.ceil(worst) + " px past the line";
+    }
+
+    // kind 33: int caster, int hero it was thrown at (0 = none), short dx, short dy (the end from the caster's feet).
+    // Only a picture for the others: the hits are checked on their own (aimAllows / PvpAttackHandler).
+    public static net.packet.Packet chainAimPacket(Character chr, int skillId, int dx, int dy, int targetId) {
+        int reach = Math.max(350, StorySkills.value(skillId, Math.max(1, chr.getSkillLevel(skillId)), "attackReach"));
+        int limit = reach * 2;
+        if (targetId != 0 && (chr.getMap() == null || chr.getMap().getCharacterById(targetId) == null)) {
+            targetId = 0;
+        }
+        net.packet.OutPacket p = StoryZones.fx(FX_CHAIN_AIM);
+        p.writeInt(chr.getId());
+        p.writeInt(targetId);
+        p.writeShort(Math.max(-limit, Math.min(limit, dx)));
+        p.writeShort(Math.max(-limit, Math.min(limit, dy)));
+        return p;
     }
 
     // --- Before the hit loop: forget the last attack's hits (one line)
@@ -125,10 +280,22 @@ public final class StoryAttacks {
         // Blast Arrow pushes, Chain pulls (the client moves the monster; this client must then drive it)
         int pullTo = StorySkills.value(skillId, level, "pullTo");
         int push = StorySkills.value(skillId, level, "push");
-        if (!boss && (push > 0 || pullTo > 0)) {
+        int pushProp = StorySkills.value(skillId, level, "pushProp");
+        boolean pushed = push > 0 && rollPush(pushProp);
+        if (!boss && (pushed || pullTo > 0)) {
             monster.aggroSwitchController(chr, true);
-            if (push > 0) {
-                StoryPush.start(monster, push, chr.getName());   // the client knocks it; logs where it lands
+            int away = monster.getPosition().x < chr.getPosition().x ? -1 : 1;
+            if (pushed) {
+                StoryPush.start(monster, push, chr.getName());   // logs where it lands
+                // anti-cheat #23: the slide path is free for the monster move check (pushProp 0 = the client picks the side)
+                server.anticheat.MobMoveCheck.knock(monster, pushProp > 0 ? away : 0, push, "push by " + chr.getName());
+                if (pushProp > 0) {   // the roll is ours: tell the shooter's client to knock it (it controls it now)
+                    chr.sendPacket(StorySweep.pullPacket(monster.getObjectId(), away, push));
+                }
+            }
+            if (pullTo > 0) {   // Chain: the thrower's client sets it pullTo px in front of the thrower (anti-cheat #23 path)
+                Point me = chr.getPosition();
+                server.anticheat.MobMoveCheck.pull(monster, new Point(me.x + away * pullTo, me.y), "chain by " + chr.getName());
             }
         }
         StorySkills.Info info = StorySkills.get(skillId);
@@ -174,7 +341,9 @@ public final class StoryAttacks {
             log.info("story ice lance {}: froze monster {} for {} ms", chr.getName(), monster.getObjectId(), time);
             return;
         }
-        if (victim != null && victim.isAlive() && !victim.pvpShielded() && StoryAuras.chilledHero(victim)) {
+        // Anchor Blade planted (user 2026-10-29): no freeze, no ice block
+        if (victim != null && victim.isAlive() && !victim.pvpShielded() && StoryAuras.chilledHero(victim)
+                && !StoryAnchor.immune(victim)) {
             StoryZones.stunPlayer(victim, ms);
             StoryAuras.heroStatus(victim, StoryAuras.FREEZE, ms, false);
             log.info("story ice lance {}: froze {} for {} ms", chr.getName(), victim.getName(), ms);
@@ -367,8 +536,12 @@ public final class StoryAttacks {
                     StorySkills.value(skillId, level, "pullTo") > 0 ? ", pulled" : "");
         }
         int push = StorySkills.value(skillId, level, "push");
-        if (push > 0) {
-            moveVictim(victim, at, new Point(at.x + side * push, at.y));   // along the victim's own platform
+        if (push > 0 && rollPush(StorySkills.value(skillId, level, "pushProp"))) {
+            if (keepsFooting(victim)) {
+                log.info("story push {} -> {}: Firm Footing kept them standing", chr.getName(), victim.getName());
+            } else {
+                moveVictim(victim, at, new Point(at.x + side * push, at.y), false);   // along the victim's own platform
+            }
         }
         // Chain: the chain flies out and comes back (OpenStory Combat chain shot, ~14 px per 8 ms tick each way),
         // then the victim stands pullTo px in front of the caster
@@ -378,12 +551,18 @@ public final class StoryAttacks {
         }
         if (pullTo > 0) {
             MapleMap map = chr.getMap();
-            long delay = Math.max(150, Math.min(500, (long) (Math.abs(at.x - from.x) * 1.15)));
+            // the chain flies the straight line (any direction, user 2026-10-28), so the whole distance counts
+            int away = (int) Math.round(from.distance(at));
+            long delay = Math.max(150, Math.min(500, (long) (away * 1.15)));
+            // "Wounded" (user 2026-10-28): no potions from the hit until the pull's slide ends (StoryWound, at least 1 s)
+            int pullPx = Math.max(0, away - pullTo);
+            StoryWound.block(chr, victim, skillId, (int) delay + slideMs(pullPx, true), "chain pull");
             TimerManager.getInstance().schedule(() -> {
                 if (victim.isAlive() && victim.getMap() == map && chr.getMap() == map && !StoryDome.blocks(chr, victim)
                         && !server.starter.StoryParty.allies(chr, victim)) {   // they may have joined during the throw
                     Point now = chr.getPosition();
-                    moveVictim(victim, now, new Point(now.x + side * pullTo, now.y));   // onto the caster's platform
+                    // onto the caster's platform, from above or below too (StoryPlace lands it from the caster's spot)
+                    moveVictim(victim, now, new Point(now.x + side * pullTo, now.y), true);
                 }
             }, delay);
         }
@@ -393,6 +572,7 @@ public final class StoryAttacks {
             server.life.MobSkillFactory.getMobSkill(server.life.MobSkillType.STUN, 1)
                     .ifPresent(stun -> victim.giveDebuff(client.Disease.STUN, stun, stunMs));
         }
+        StoryWound.fromSkill(chr, victim, skillId, level, "skill " + skillId + " hit");   // Sniper Shot: potions heal less (StoryWound)
         freeze(chr, skillId, level, null, victim);   // Ice Lance on a chilled player
         StoryLance.stick(chr, skillId, null, victim);   // Lingering Lance (lv 70 passive)
         int ticks = StorySkills.value(skillId, level, "ticks");
@@ -406,15 +586,52 @@ public final class StoryAttacks {
         }
     }
 
+    // --- Does this push happen? pushProp % (Blast Arrow 30% -> 70%, user 2026-10-28); 0 = every time (one line)
+    private static boolean rollPush(int pushProp) {
+        return pushProp <= 0 || Randomizer.nextInt(100) < pushProp;
+    }
+
+    // --- Firm Footing keeps this player standing against a push: knockIgnore % (5% -> 20%) (one line)
+    // Related down: StorySkills.passive (sword passive Firm Footing 10009, always on, user 2026-10-29; it was Iron
+    //               Guard's buff before), OpenStory Player::keeps_footing (the same roll for a monster's knock-back)
+    // Pitfall:      only for pushes. Chain's pull, Rescue Rope, Sweep Pull and the like never ask it.
+    static boolean keepsFooting(Character victim) {
+        int hold = StorySkills.passive(victim, "knockIgnore");
+        return hold > 0 && Randomizer.nextInt(100) < hold;
+    }
+
     // --- Push or pull a player: along the platform `base` stands on, stopping at its end (StoryPlace) (one line)
-    // Related up: also StoryAid (Rescue Rope pulls a party member next to the caster)
-    static void moveVictim(Character victim, Point base, Point spot) {
+    // Related up:   Blast push + Chain pull (applyToPlayer), StoryAid (Rescue Rope), StorySweep (Sweep Pull)
+    // Related down: PacketCreator.storySlide (to the whole map: every screen draws the same slide, user 2026-10-28),
+    //               MoveCheck.serverMove (the path from -> spot is free, so the slide's in-between spots pass)
+    // Pitfall:      the end spot and the server's position are set at once, as before; only the picture slides.
+    //               A tiny move (< SLIDE_MIN_PX) is a plain pullPlayer to the victim (puts the body right, no slide).
+    // Returns the slide's ms (0 = a tiny move, no slide): Sweep Pull blocks potions that long (StoryWound).
+    static int moveVictim(Character victim, Point base, Point spot, boolean pull) {
+        Point from = new Point(victim.getPosition());
         spot = StoryDome.keepSpot(victim.getMap(), victim.getId(), false, spot);   // a push or pull never crosses a Dome's wall
         spot = StoryAnchor.keepSpot(victim, spot);   // a hero tied by Anchor Blade stops at the end of the rope
         spot = StoryPlace.place(victim.getMap(), "player " + victim.getName(), base, spot, false, victim.getPosition());
         victim.setPosition(new Point(spot));
-        victim.sendPacket(PacketCreator.pullPlayer(spot));
+        int distance = (int) Math.round(from.distance(spot));
+        int slide = 0;
+        if (distance < SLIDE_MIN_PX || victim.getMap() == null) {
+            victim.sendPacket(PacketCreator.pullPlayer(spot));
+        } else {
+            slide = slideMs(distance, pull);
+            victim.getMap().broadcastMessage(PacketCreator.storySlide(victim.getId(), from, spot, slide, pull));
+        }
         server.anticheat.MoveCheck.serverMove(victim, spot);
+        return slide;
+    }
+
+    // --- How long a pushed / pulled hero slides: push ~250 ms, pull ~300 ms, a little longer for a longer way (one line)
+    // Pitfall: keep it well under move_server_grace_ms (1500): the victim's in-between spots must stay on the free path.
+    private static final int SLIDE_MIN_PX = 8;
+
+    static int slideMs(int distance, boolean pull) {
+        return pull ? Math.max(250, Math.min(420, 200 + distance * 2 / 7))   // Chain ~350 px -> 300 ms
+                : Math.max(200, Math.min(350, 180 + distance / 2));        // Blast push ~140 px -> 250 ms
     }
 
     // --- Frost Field on a player: ticks - 1 more hits through PvpHits (shield, guards, defeat) (one line)
@@ -616,6 +833,7 @@ public final class StoryAttacks {
                 StoryZones.hitMonster(chr, monster, percent, false, "piercing sniper");
             } else {
                 StoryZones.hitPlayer(chr, (Character) o[1], percent, false);
+                StoryWound.fromSkill(chr, (Character) o[1], skillId, level, "piercing sniper");   // Sniper Shot's potion cut
             }
             n++;
         }

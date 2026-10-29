@@ -312,6 +312,29 @@ public final class StoryPlace {
         return floor == null ? null : new Point(at.x, (int) Math.round(groundAt(floor, at.x)));
     }
 
+    // --- The lowest spot a fall from height y lands on anywhere between x1 and x2 (one line)
+    // Related up:   StoryDome.cast (how far down the cage's sides reach; OpenStory Combat::dome_depth does the same)
+    // Rule:         every `step` px inside the map's walls, the first floor at or below y; the deepest of them wins.
+    //               Integer.MAX_VALUE = somewhere in that span nothing is below (a pit: a fall there never lands).
+    public static int lowestLanding(MapleMap map, int x1, int x2, int y, int step) {
+        Index idx = index(map);
+        if (idx == null || idx.floors.isEmpty()) {
+            return Integer.MAX_VALUE;
+        }
+        // the client's walls stand 25 px inside the outer footholds (OpenStory FootholdTree walls): nobody gets past them
+        int from = Math.max(idx.wallL + 25, Math.min(x1, x2));
+        int to = Math.min(idx.wallR - 25, Math.max(x1, x2));
+        int deepest = Integer.MIN_VALUE;
+        for (int x = from; x <= to; x = x == to ? to + 1 : Math.min(to, x + Math.max(1, step))) {
+            Foothold floor = floorBelow(idx, x, y);
+            if (floor == null) {
+                return Integer.MAX_VALUE;
+            }
+            deepest = Math.max(deepest, (int) Math.round(groundAt(floor, x)));
+        }
+        return deepest == Integer.MIN_VALUE ? y : deepest;
+    }
+
     // --- After a monster's movement packet: never store a spot inside the ground (one line)
     // Related up:   MoveLifeHandler, after updatePosition (server y = client y - 2, so a mob on a floor is 2 px above it)
     // Why:          a spot a little inside a floor is set on top of it; a spot with no floor under it at all (fallen

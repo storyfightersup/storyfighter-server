@@ -781,6 +781,7 @@ public class MapleMap {
             int gold = server.starter.StoryContent.rollGold(mob.getId());   // content/mobs "gold"
             if (gold > 0) {
                 gold = (int) Math.min((long) gold * chr.getMesoRate(), Integer.MAX_VALUE);
+                gold = server.starter.StoryRates.gold(gold);   // live gold rate (GM !rate gold)
                 gold = server.starter.StoryGearBonus.gold(chr, gold);   // ring: + gold % (user 2026-10-24)
                 pos.x = mobpos;
                 spawnMesoDrop(gold, calcDropPos(pos, mob.getPosition()), mob, chr, false, droptype, delay);
@@ -1264,6 +1265,27 @@ public class MapleMap {
             }
         }, null);
 
+        instantiateItemDrop(mdrop);
+    }
+
+    // --- StoryFighter gold cart gold (server.starter.StoryCart, docs/GOLD-CART.md): one ownerless gold drop (free for
+    //     all) that only heroes of level <= levelMax can pick up (MapItem.getPickupLevelMax) (one line)
+    // Pitfall: the dropper is the cart's stand-in object (not on the map): only its position and object id are read.
+    public final void spawnCartGold(final int meso, final Point position, final MapObject dropper, final int levelMax) {
+        if (meso <= 0) {
+            return;
+        }
+        final Point droppos = calcDropPos(position, position);
+        final MapItem mdrop = new MapItem(meso, droppos, dropper, levelMax);
+        mdrop.setDropTime(System.currentTimeMillis());   // real clock, like spawnMesoDrop
+        spawnAndAddRangedMapObject(mdrop, c -> {
+            mdrop.lockItem();
+            try {
+                c.sendPacket(PacketCreator.dropItemFromMapObject(c.getPlayer(), mdrop, position, droppos, (byte) 1, (short) 0));
+            } finally {
+                mdrop.unlockItem();
+            }
+        }, null);
         instantiateItemDrop(mdrop);
     }
 
@@ -2649,7 +2671,8 @@ public class MapleMap {
         server.starter.StoryOutposts.showTo(chr);   // StoryFighter: this map's Team outpost flag (count 0 if none)
         server.starter.StoryOpenBoss.showTo(chr);   // StoryFighter: the open boss altar on this map (present 0 if none)
         server.starter.StoryCities.showTo(chr);   // StoryFighter: the city monument on a Monument Square (channel 1 only)
-        server.starter.StoryCitizens.enteredMap(chr);   // StoryFighter: op 5, heroes on this map safe by a citizenship (docs/CITIZENS.md)
+        server.starter.StoryCart.showTo(chr);   // StoryFighter: gold carts rolling on this map (docs/GOLD-CART.md op 0)
+        server.starter.StoryCitizens.enteredMap(chr);   // StoryFighter: op 5 (heroes safe by a citizenship) + op 9 (citizen mark) for this map (docs/CITIZENS.md)
     }
 
     private static void announcePlayerDiseases(final Client c) {

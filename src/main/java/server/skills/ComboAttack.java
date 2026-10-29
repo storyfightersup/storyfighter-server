@@ -185,7 +185,7 @@ public final class ComboAttack {
     }
 
     // --- An orbiting orb touched a monster (one line)
-    // Related up:   ComboOrbHandler, opcode 0x106
+    // Related up:   ComboOrbHandler, opcode COMBO_ORB 0x124
     // Related down: hit
     // Pitfall:      the client only names the monster. Damage is rolled here. A mob outside the orbit is ignored.
     //               Each monster can take one hit per orb per TOUCH_GAP_MS.

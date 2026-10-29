@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *    FrostRun, monsters and heroes) takes magic damage recallBase % (Frost Recall's level) + recallPerCombo % x combo
  *    (Frost Combo's level, the passive; 0 without it; user 2026-10-27), its frost ends (no more
  *    ticks, no slow, no chill look), the combo goes to 0, and the caster gets recallMp % of max MP per shard.
- * Packets (STORY_SKILL_FX 0x1A0, see StoryZones; to everyone on the map, the caster too):
+ * Packets (STORY_SKILL_FX 0x518, see StoryZones; to everyone on the map, the caster too):
  *   FX_COMBO 31:  int cid, int skill (Frost Combo id, for the crystal art; 0 = not learned), byte combo, byte max,
  *                 int ms until the combo is lost (0 = gone), int ms until the caster's own frost on enemies here ends
  *                 (auto-play recalls before it runs out; 0 = none)
@@ -235,7 +235,7 @@ public final class StoryFrost {
                 StoryAttacks.frostLeftMs(chr));
     }
 
-    // ================================================================ packets (STORY_SKILL_FX 0x1A0)
+    // ================================================================ packets (STORY_SKILL_FX 0x518)
 
     static Packet comboPacket(int cid, int skillId, int combo, int max, int keepMs, int frostMs) {
         OutPacket p = StoryZones.fx(FX_COMBO);

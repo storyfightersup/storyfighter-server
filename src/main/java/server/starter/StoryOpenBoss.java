@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Center pickup box; offline scorers -> box) and the altar rests openBossRespawnS s. Nobody hits it for
  * openBossIdleLeaveS s -> it leaves, no prizes, the altar is ready at once. State is not saved (ready after a restart).
  *
- * Packet out: STORY_OPEN_BOSS (0x1A9): kind 0 state (map enter, changes, every second in a fight), kind 1 result.
+ * Packet out: STORY_OPEN_BOSS (0x511): kind 0 state (map enter, changes, every second in a fight), kind 1 result.
  *
  * Related up:   Server.init (start), MapleMap.addPlayer (showTo), MapleMap.dropFromMonster (isOpenBoss: no drops),
  *               MapFactory (altar NPC script), OpenBossCommand (GM)
@@ -675,7 +675,7 @@ public final class StoryOpenBoss {
         }
     }
 
-    // ================================================================ packets (STORY_OPEN_BOSS 0x1A9)
+    // ================================================================ packets (STORY_OPEN_BOSS 0x511)
 
     // --- An arriving hero sees the altar state, or present 0 (one line)
     // Related up:   MapleMap.addPlayer

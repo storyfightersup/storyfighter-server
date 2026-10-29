@@ -8,7 +8,7 @@ import server.skills.ComboAttack;
 
 /**
  * A spinning Combo Attack orb touched a monster.
- * Opcode 0x106. The client sends the monster id. The server rolls the hit.
+ * Opcode COMBO_ORB (0x124). The client sends the monster id. The server rolls the hit.
  */
 public final class ComboOrbHandler extends AbstractPacketHandler {
     @Override

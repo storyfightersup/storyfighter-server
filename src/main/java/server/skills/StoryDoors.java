@@ -23,7 +23,7 @@ import java.util.concurrent.ScheduledFuture;
  * (USE_SKILL phase 3, enterPacket; the server checks everything: owner, party, distance, Dome wall, Anchor rope, a gap
  * between two uses). Enemies cannot use them. A new first door closes the old pair. The doors close when the caster
  * leaves the map (or logs off). Auto-play never casts it (noAuto).
- * Packets (STORY_SKILL_FX 0x1A0): kind 18 (the pair), kind 19 (someone went through), see the methods below.
+ * Packets (STORY_SKILL_FX 0x518): kind 18 (the pair), kind 19 (someone went through), see the methods below.
  * Related up:   SpecialMoveHandler (enterPacket, before the weapon / level checks: a party member has no such skill),
  *               StoryZones.use (Kind.DOOR: cast), StoryZones.showTo (showTo, onEnterMap)
  * Related down: StoryPlace.place (the floor), StoryDome.crossesWall / keepSpot, StoryAnchor.allows, PacketCreator.pullPlayer,
@@ -265,7 +265,7 @@ public final class StoryDoors {
         }
     }
 
-    // ================================================================ packets (STORY_SKILL_FX 0x1A0)
+    // ================================================================ packets (STORY_SKILL_FX 0x518)
 
     // kind 18: int caster id, int skill, int party id (-1 none: the client only uses it to know if it may go through),
     //          byte state (0 = closed, 1 = door A waiting, 2 = both open), short ax, short ay, short bx, short by (feet

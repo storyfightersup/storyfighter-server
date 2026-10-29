@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Why not the old v83 summons: their attacks and the monster hits on them are reported by the client (trusting the
  * client), and PvP never reached them. Here the server owns everything: spots, targets, timing, damage, HP; clients
  * only draw (like StoryTraps). Hits are dealt in the caster's name (Hex, crit, EXP and the kill are theirs).
- * Packets (STORY_SKILL_FX 0x1A0): kinds 8-11 and 14 (a twin's walk / fall), see the packet methods below.
+ * Packets (STORY_SKILL_FX 0x518): kinds 8-11 and 14 (a twin's walk / fall), see the packet methods below.
  * Related up:   StoryZones.use (cast), AbstractDealDamageHandler.applyAttack (onAttack), StoryHammer (hammer),
  *               DamageGuards.apply (share), MapleMap.addPlayer (StoryZones.showTo -> showTo)
  * Related down: OpenStory Gameplay/Combat/StoryAllies (draws sentries, twins, arrows, frost rings, HP bars)
@@ -236,6 +236,7 @@ public final class StoryUnits {
                 continue;
             }
             StoryDome.withoutDrain(() -> StoryZones.hitPlayer(owner, other, percent, false));
+            StoryWound.fromSkill(owner, other, unit.skillId, unit.level, "decoy doll blast");   // potions heal less after it
             heroes++;
         }
         log.info("story decoy {} of {}: exploded at {},{} ({}% within {} px): {} monsters and {} heroes", unit.id, owner.getName(), at.x,
@@ -282,6 +283,7 @@ public final class StoryUnits {
         int hp = (int) Math.max(1, (long) chr.getCurrentMaxHp() * StorySkills.value(skillId, level, "twinHp") / 100);
         Point from = new Point(chr.getPosition());
         long now = System.currentTimeMillis();
+        LAST_TWIN_CAST.put(chr.getId(), now);   // recall: no call-back within RECALL_AFTER_CAST_MS of this
         map.broadcastMessage(chr, PacketCreator.showBuffEffect(chr.getId(), skillId, 1), false);
         for (int side : new int[]{-1, 1}) {
             StoryPlace.Landing landing = StoryPlace.land(map, from, new Point(from.x + side * gap, from.y), false);
@@ -913,7 +915,11 @@ public final class StoryUnits {
     // --- Twin call-back: the Mirror Twins key while the twins are out (one line)
     // Related up:   StoryZones.use (TWINS, before the MP and cooldown of a cast)
     // Returns true when the caster has twins out (the press was a call-back, even one refused by the gap).
+    // Pitfall: a held key's repeat called the twins back 0.4 s after the cast (live log 2026-10-29): a call-back within
+    //          RECALL_AFTER_CAST_MS of the cast is refused (the client waits for a key release + a new press too).
     private static final Map<Integer, Long> LAST_RECALL = new ConcurrentHashMap<>();
+    private static final Map<Integer, Long> LAST_TWIN_CAST = new ConcurrentHashMap<>();
+    private static final long RECALL_AFTER_CAST_MS = 1000;
 
     public static boolean recall(Character chr, int skillId, int level) {
         List<Unit> list = chr.getMap() == null ? null : UNITS.get(chr.getMap());
@@ -929,6 +935,11 @@ public final class StoryUnits {
             return false;
         }
         long now = System.currentTimeMillis();
+        Long cast = LAST_TWIN_CAST.get(chr.getId());
+        if (cast != null && now - cast < RECALL_AFTER_CAST_MS) {
+            log.info("story twins {}: call-back refused ({} ms after the cast, needs {})", chr.getName(), now - cast, RECALL_AFTER_CAST_MS);
+            return true;
+        }
         int gap = Math.max(300, StorySkills.value(skillId, level, "recallGap"));
         Long last = LAST_RECALL.get(chr.getId());
         if (last != null && now - last < gap) {
@@ -1236,10 +1247,32 @@ public final class StoryUnits {
         if (last != null && now - last < PLAYER_HIT_GAP_MS) {
             return;
         }
+        int damage = heroAttackDamage(attacker, skillId);
+        if (damage <= 0) {
+            return;
+        }
+        boolean any = false;
+        for (Unit unit : list) {
+            if (!enemyUnit(attacker, unit) || StoryDome.blocksSpot(map, unit.at, false, attacker.getId())
+                    || !heroAttackReaches(attacker, skillId, unit.at)) {
+                continue;
+            }
+            any = true;
+            hurt(unit, damage, HP_HIT, "hit by " + attacker.getName() + " skill " + skillId);
+        }
+        if (any) {
+            LAST_PLAYER_HIT.put(attacker.getId(), now);
+        }
+    }
+
+    // --- What one hero attack does to a server-owned thing (a unit, a gold cart): the skill's % x its hits of weapon or
+    //     magic attack, no defense, no crit; a plain attack = 100 % x 1. 0 = this attack does nothing (one line)
+    // Related up:   onAttack, server.starter.StoryCart.onAttack
+    public static int heroAttackDamage(Character attacker, int skillId) {
         int level = attacker.getSkillLevel(skillId);
         boolean story = skillId != 0 && StorySkills.isStory(skillId);
         if (skillId != 0 && (!story || level <= 0)) {
-            return;
+            return 0;
         }
         int percent;
         int lines;
@@ -1255,35 +1288,25 @@ public final class StoryUnits {
             lines = 1;
         }
         if (percent <= 0) {
-            return;
+            return 0;
+        }
+        double attack = magic ? StoryDamage.magicAttack(attacker) : StoryDamage.weaponAttack(attacker);
+        return (int) Math.max(1, Math.ceil(attack * percent / 100.0)) * lines;
+    }
+
+    // --- Does this hero attack reach a feet point? The skill's own lt/rb box from the attacker, both sides
+    //     (StorySkills.inBox) + its reach; a plain attack PLAIN_BOW px with a bow, else PLAIN_MELEE px (one line)
+    // Related up:   onAttack, server.starter.StoryCart.onAttack
+    public static boolean heroAttackReaches(Character attacker, int skillId, Point at) {
+        if (skillId != 0 && StorySkills.isStory(skillId)) {
+            return StorySkills.inReach(attacker, skillId, at) && StorySkills.inBox(attacker, skillId, at);
         }
         Point from = attacker.getPosition();
         client.inventory.Item weapon = attacker.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11);
         boolean bow = weapon != null && weapon.getItemId() / 10000 == 145;
         int plain = bow ? PLAIN_BOW : PLAIN_MELEE;
-        double attack = magic ? StoryDamage.magicAttack(attacker) : StoryDamage.weaponAttack(attacker);
-        int damage = (int) Math.max(1, Math.ceil(attack * percent / 100.0)) * lines;
-        boolean any = false;
-        for (Unit unit : list) {
-            if (!enemyUnit(attacker, unit) || StoryDome.blocksSpot(map, unit.at, false, attacker.getId())) {
-                continue;
-            }
-            boolean inside;
-            if (story) {
-                inside = StorySkills.inReach(attacker, skillId, unit.at) && StorySkills.inBox(attacker, skillId, unit.at);
-            } else {
-                int dy = unit.at.y - from.y;
-                inside = Math.abs(unit.at.x - from.x) <= plain && dy >= -100 && dy <= 40;
-            }
-            if (!inside) {
-                continue;
-            }
-            any = true;
-            hurt(unit, damage, HP_HIT, "hit by " + attacker.getName() + " skill " + skillId);
-        }
-        if (any) {
-            LAST_PLAYER_HIT.put(attacker.getId(), now);
-        }
+        int dy = at.y - from.y;
+        return Math.abs(at.x - from.x) <= plain && dy >= -100 && dy <= 40;
     }
 
     // --- Quake Hammer's shock: enemy units within range take its % of weapon attack (one line)
@@ -1343,7 +1366,7 @@ public final class StoryUnits {
         }
     }
 
-    // ================================================================ packets (STORY_SKILL_FX 0x1A0)
+    // ================================================================ packets (STORY_SKILL_FX 0x518)
 
     // kind 8: int unit id, int caster id, int skill, byte type (1 sentry, 2 twin, 3 bomb sentry, 4 Decoy Doll), short x,
     //         short y (where it stands), short fromX, short fromY (the caster's feet at the cast; = x, y for a late joiner),

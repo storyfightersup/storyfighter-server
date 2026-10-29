@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter live rates (user 2026-10-28, GM command !rate, server.starter.StoryRates): the SAVED rate of each
+         kind, used until a GM changes it (survives a restart). One row per kind: exp (monster EXP), gold (monster
+         gold), drop (item drops from content/mobs), gear (gear drops). No row = x1.
+         rate = the multiplier (0.10 .. 10.00); setby = the GM hero's name; changed = when.
+         A timed event (!rate <kind> <x> <minutes>) is NOT stored here: it lives in memory and a restart ends it.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-028-story-rates" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storyrates"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storyrates
+            (
+                kind    VARCHAR(8)    NOT NULL,
+                rate    DECIMAL(5, 2) NOT NULL DEFAULT 1.00,
+                setby   VARCHAR(13)   NOT NULL DEFAULT '',
+                changed TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (kind)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

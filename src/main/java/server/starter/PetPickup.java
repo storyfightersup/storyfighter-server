@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * The server is the authority: the bank is in table storypetpickup (db extension 011), PetLootHandler refuses every
  * pet pickup while {@link #mayLoot} is false, and the normal loot rules (MapItem.canBePickedBy, BossLoot) still apply
- * to the pet. The client (OpenStory Gameplay/PetPickup) only mirrors packet STORY_PET (0x1A6): int seconds left,
+ * to the pet. The client (OpenStory Gameplay/PetPickup) only mirrors packet STORY_PET (0x514): int seconds left,
  * byte running. Sent at login, on every change and every {@link #SEND_EVERY_MS} while running.
  *
  * Grants: {@link #addTickets} (free ticket, GM !pettickets, later the web shop) and {@link #useTicket}. Every grant,
@@ -172,7 +172,7 @@ public final class PetPickup {
 
     // ================================================================ toggle / pause
 
-    /** Packet STORY_PET_TOGGLE (0x109): byte op (0 = toggle, 1 = on, 2 = off). */
+    /** Packet STORY_PET_TOGGLE (0x189): byte op (0 = toggle, 1 = on, 2 = off). */
     public static final class Handler extends AbstractPacketHandler {
         @Override
         public void handlePacket(InPacket p, Client c) {
@@ -486,7 +486,7 @@ public final class PetPickup {
         }
     }
 
-    /** STORY_PET (0x1A6): int seconds left, byte running. OpenStory PetPickupHandler -> PetPickup::set_state. */
+    /** STORY_PET (0x514): int seconds left, byte running. OpenStory PetPickupHandler -> PetPickup::set_state. */
     private static void send(State st, long now) {
         st.lastSent = now;
         if (st.chr.getClient() == null) {

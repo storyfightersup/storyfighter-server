@@ -23,11 +23,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  * StoryFighter's staff skill Dome (content/skills/skills.json, type "zone"): a cage around the caster for domeTime ms.
  * Everyone inside when it goes up (the caster, monsters, and on a PvP stage the other players) is a member: members cannot leave, others cannot get
  * in, and no hit crosses the wall in either way (members hit members, outsiders hit outsiders).
- * Shape: half an ellipse on the caster's feet, domeRadius px to each side, domeHeight px up, plus domeFloor px below
- * the feet. The client draws it and keeps bodies in/out with the same shape (OpenStory Combat domes, PhysicsObject cages).
- * Related up:   SpecialMoveHandler (cast), MovePlayerHandler / MoveLifeHandler (keepPlayer / keepMonster),
+ * Shape: half an ellipse on the floor under the caster (domeRadius px to each side, domeHeight px up); below that line
+ * the sides go straight down (same half width) to the LOWEST floor under the cage (user 2026-10-28: no bottom wall in the
+ * air: a hero who walks off a low platform inside falls to the ground and stays caged). `floor` = px from the centre line
+ * down to that floor plus domeFloor px of slack, fixed at the cast (StoryPlace.lowestLanding). A pit under any part of
+ * the cage = no lower limit (NO_BOTTOM): a fall there goes on as the map's rules say. The client gets `floor` in the dome
+ * packet and uses it for the same shape (OpenStory PhysicsCage, Combat::dome_allows / update_domes / draw, auto-play).
+ * The caster's key pressed again while their own Dome stands ends it at once (endOwn; user 2026-10-28; no MP, the
+ * cooldown keeps counting from the cast), but only from endAfter ms (2 s) after the cast; an earlier press is ignored.
+ * Related up:   SpecialMoveHandler (cast, endOwn), MovePlayerHandler / MoveLifeHandler (keepPlayer / keepMonster),
  *               AbstractDealDamageHandler, StoryAttacks, PvpHits, TakeDamageHandler (blocks), MapleMap.addPlayer (showTo)
- * Related down: PacketCreator.storyDome (STORY_DOME 0x198)
+ * Related down: PacketCreator.storyDome (STORY_DOME 0x50D)
  * Pitfall:      membership is fixed when the dome goes up. A monster that spawns inside later is an outsider.
  * Pitfall:      the wall blocks hits both ways (Claude's choice): otherwise a caster could shoot out of a cage
  *               nobody can shoot into.
@@ -41,6 +47,7 @@ public final class StoryDome {
         final Point center;
         final int radius;
         final int height;
+        /** px below the centre line the sides reach: the lowest floor under the cage + domeFloor slack (NO_BOTTOM = a pit). */
         final int floor;
         final long endsAt;
         final Set<Integer> chars;
@@ -52,6 +59,10 @@ public final class StoryDome {
         /** Mana Siphon (lv 50 passive, 2026-10-25): % of that damage that comes back as MP, and the passive's id (its art). */
         volatile int siphonPct;
         volatile int siphonSkill;
+        /** "Wounded" (user 2026-10-28, StoryWound): enemy heroes caged in it heal potionCut % less from potions and flasks. */
+        volatile int potionCut;
+        /** The caster's key ends it only from this time on (cast + endAfter ms; user 2026-10-28: 2 s). */
+        volatile long canEndAt;
 
         Dome(int id, int casterId, int skillId, MapleMap map, Point center, int radius, int height, int floor, long endsAt,
              Set<Integer> chars, Set<Integer> mobs) {
@@ -108,10 +119,11 @@ public final class StoryDome {
             return (int) Math.max(0, endsAt - System.currentTimeMillis());
         }
 
+        // Above the centre line: the half ellipse. Below it: the straight sides, down to `floor` (no bottom in the air).
         boolean inside(Point p) {
             int dx = p.x - center.x;
             int up = center.y - p.y;
-            if (p.y > center.y + floor || Math.abs(dx) > radius) {
+            if (p.y - center.y > floor || Math.abs(dx) > radius) {
                 return false;
             }
             if (up <= 0) {
@@ -129,7 +141,7 @@ public final class StoryDome {
         // The nearest spot inside (for a member)
         Point keepIn(Point p) {
             int x = Math.max(center.x - radius, Math.min(center.x + radius, p.x));
-            int y = Math.min(center.y + floor, p.y);
+            int y = (int) Math.min((long) center.y + floor, p.y);
             double fx = (double) (x - center.x) / radius;
             int top = center.y - (int) Math.floor(height * Math.sqrt(Math.max(0.0, 1.0 - fx * fx)));
             if (y < top) {
@@ -144,10 +156,15 @@ public final class StoryDome {
         }
     }
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StoryDome.class);
     private static final Map<MapleMap, List<Dome>> DOMES = new ConcurrentHashMap<>();
     private static final AtomicInteger NEXT_ID = new AtomicInteger(1);
     /** px a body may be off before the server puts it back (its spot lags the client's). */
     private static final int SLACK = 30;
+    /** `floor` of a Dome with a pit under it: no lower limit (fits the packet's short; the client reads it the same way). */
+    public static final int NO_BOTTOM = 30000;
+    /** px between the floors sampled under a cage (StoryPlace.lowestLanding; OpenStory Combat::dome_depth uses the same). */
+    private static final int DEPTH_STEP = 4;
 
     private StoryDome() {
     }
@@ -185,9 +202,14 @@ public final class StoryDome {
         // Grand Dome (lv 40 passive, 2026-10-25): wider and longer; the size goes to every client in the dome packet
         int radius = Math.max(40, StorySkills.value(skillId, level, "domeRadius") + StorySkills.passive(chr, "domeRadiusPlus"));
         int height = Math.max(40, StorySkills.value(skillId, level, "domeHeight"));
-        int floor = Math.max(0, StorySkills.value(skillId, level, "domeFloor"));
+        int slack = Math.max(0, StorySkills.value(skillId, level, "domeFloor"));
         int ms = Math.max(500, StorySkills.value(skillId, level, "domeTime") + StorySkills.passive(chr, "domeTimePlus"));
-        Point center = new Point(chr.getPosition());
+        // On the floor under the caster, not at the caster's spot: a Dome cast in a jump or on a rope had its floor in
+        // the air and everyone inside stood stuck on that invisible bottom (user 2026-10-28). No floor below = as before.
+        Point at = chr.getPosition();
+        Point ground = StoryPlace.landingBelow(map, new Point(at.x, at.y - StoryPlace.STEP_UP));   // a standing caster keeps their own floor
+        Point center = ground != null ? ground : new Point(at);
+        int floor = depth(map, center, radius, slack);
         Dome shape = new Dome(0, 0, skillId, map, center, radius, height, floor, 0, Set.of(), Set.of());
 
         Set<Integer> chars = new HashSet<>();
@@ -211,10 +233,52 @@ public final class StoryDome {
         dome.drainPct = Math.max(0, StorySkills.value(skillId, level, "lifeDrain"));
         dome.siphonPct = Math.max(0, Math.min(100, StorySkills.passive(chr, "manaSiphon")));
         dome.siphonSkill = StorySkills.passiveId(chr, "manaSiphon");
+        dome.potionCut = Math.max(0, Math.min(100, StorySkills.value(skillId, level, "potionCut")));
+        dome.canEndAt = System.currentTimeMillis() + Math.max(0, StorySkills.value(skillId, level, "endAfter"));
         DOMES.computeIfAbsent(map, m -> new CopyOnWriteArrayList<>()).add(dome);
         map.broadcastMessage(PacketCreator.storyDome(dome, ms));
+        woundMarks(dome);   // the caged enemy heroes wear the cracked-potion mark while it stands (StoryWound)
         TimerManager.getInstance().schedule(() -> end(dome), ms);
         chr.sendPacket(PacketCreator.enableActions());
+    }
+
+    // --- How far below the centre line the cage's sides reach (its `floor`) (one line)
+    // Related up:   cast. Related down: StoryPlace.lowestLanding; OpenStory Combat::dome_depth (auto-play's guess, same rule)
+    // Rule:         the lowest floor a fall inside the cage's width lands on, + slack px (domeFloor). The caster's own
+    //               flat floor everywhere = slack, as before. A pit anywhere under it = NO_BOTTOM.
+    // Why:          a bottom line at the caster's floor held a hero who walked off a low platform in the air (user 2026-10-28).
+    static int depth(MapleMap map, Point center, int radius, int slack) {
+        int lowest = StoryPlace.lowestLanding(map, center.x - radius, center.x + radius, center.y - StoryPlace.STEP_UP, DEPTH_STEP);
+        if (lowest == Integer.MAX_VALUE) {
+            return NO_BOTTOM;
+        }
+        return (int) Math.min(NO_BOTTOM, Math.max(0L, (long) lowest - center.y) + slack);
+    }
+
+    // --- The caster pressed Dome again: their own Dome on this map comes down for everyone at once (one line)
+    // Related up:   SpecialMoveHandler, BEFORE the cooldown check (user 2026-10-28: press again to end it)
+    // Related down: end (the same "down" packet as the timer; OpenStory StoryDomeHandler -> Combat::set_dome ms 0)
+    // Safety:       only a Dome whose casterId is this hero, cast with this skill, on the hero's map and not yet over.
+    //               No MP, the cooldown is untouched (no faster recast). false = no own Dome: the press is a normal cast.
+    // Pitfall:      the cast's timer still runs; its end() later finds the dome gone and only repeats the "down" packet.
+    // Rule:         only from endAfter ms after the cast (user 2026-10-28: 2 s). An earlier press is swallowed quietly
+    //               (true, nothing happens: no end, no recast). The client waits the same time (Combat::use_move).
+    public static boolean endOwn(Character chr, int skillId) {
+        if (chr == null || !chr.isAlive()) {
+            return false;
+        }
+        for (Dome dome : new ArrayList<>(active(chr.getMap()))) {
+            if (dome.casterId == chr.getId() && dome.skillId == skillId && dome.map == chr.getMap()) {
+                if (System.currentTimeMillis() < dome.canEndAt) {
+                    return true;   // too soon after the cast: ignored
+                }
+                end(dome);
+                log.info("story dome {}: ended early by its caster (dome {}, {} ms were left)", chr.getName(), dome.id,
+                        dome.msLeft());
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void end(Dome dome) {
@@ -226,6 +290,56 @@ public final class StoryDome {
             }
         }
         dome.map.broadcastMessage(PacketCreator.storyDome(dome, 0));
+        woundMarks(dome);   // the mark ends (or shortens to another wound still on)
+    }
+
+    // --- "Wounded" (user 2026-10-28): the potion cut of the enemy Dome this hero is caged in (0 = none) (one line)
+    // Related up:   StoryWound.cut (potions, flasks). Enemy = the caster is not the hero's party / alliance (PvP stage).
+    public static int potionCut(Character chr) {
+        int best = 0;
+        for (Dome dome : woundingDomes(chr)) {
+            best = Math.max(best, dome.potionCut);
+        }
+        return best;
+    }
+
+    // --- The ms that cage still stands (the mark's time; 0 = none) (one line)
+    public static long potionCutMs(Character chr) {
+        long best = 0;
+        for (Dome dome : woundingDomes(chr)) {
+            best = Math.max(best, dome.msLeft());
+        }
+        return best;
+    }
+
+    private static List<Dome> woundingDomes(Character chr) {
+        MapleMap map = chr == null ? null : chr.getMap();
+        if (map == null || !map.isPvpStage()) {
+            return Collections.emptyList();
+        }
+        List<Dome> out = new ArrayList<>();
+        for (Dome dome : active(map)) {
+            if (dome.potionCut <= 0 || dome.casterId == chr.getId() || !dome.chars.contains(chr.getId())) {
+                continue;
+            }
+            Character caster = map.getCharacterById(dome.casterId);
+            if (caster == null || StoryZones.enemies(caster, chr)) {
+                out.add(dome);
+            }
+        }
+        return out;
+    }
+
+    private static void woundMarks(Dome dome) {
+        if (dome.potionCut <= 0) {
+            return;
+        }
+        for (int id : dome.chars) {
+            Character member = id == dome.casterId ? null : dome.map.getCharacterById(id);
+            if (member != null && member.isAlive()) {
+                StoryWound.showMark(member);
+            }
+        }
     }
 
     // --- Quake Hammer's shock (StoryHammer): each ENEMY Dome whose centre is within range breaks at chancePct % (one line)
@@ -371,6 +485,33 @@ public final class StoryDome {
         for (Dome dome : active(map)) {
             if (dome.inside(a) != dome.inside(b)) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    // --- Does the straight line a -> b pass through a Dome's wall anywhere along it? (one line)
+    // Related up:   StoryAttacks.chainRefusal (Chain flies a straight line in any direction, user 2026-10-28)
+    // Pitfall:      crossesWall only compares the two ends; a line from outside to outside can still cut through a
+    //               dome, so it is walked every 12 px (the same step as OpenStory Combat::dome_line_blocks).
+    public static boolean lineCrossesWall(MapleMap map, Point a, Point b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        List<Dome> domes = active(map);
+        if (domes.isEmpty()) {
+            return false;
+        }
+        double dx = b.x - a.x;
+        double dy = b.y - a.y;
+        int steps = Math.max(1, (int) (Math.sqrt(dx * dx + dy * dy) / 12.0));
+        for (Dome dome : domes) {
+            boolean start = dome.inside(a);
+            for (int i = 1; i <= steps; i++) {
+                Point at = new Point((int) Math.round(a.x + dx * i / steps), (int) Math.round(a.y + dy * i / steps));
+                if (dome.inside(at) != start) {
+                    return true;
+                }
             }
         }
         return false;

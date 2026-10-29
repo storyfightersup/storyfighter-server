@@ -213,6 +213,9 @@ public final class ElementEffects {
 
     /** The packet that tells this client its walk is slower. Ice only. */
     public static void sendMoveSlow(Character victim, int skillId, int percent, int durationMs) {
+        if (StoryAnchor.immune(victim)) {
+            return;   // Anchor Blade planted: no slow (user 2026-10-29)
+        }
         victim.sendPacket(PacketCreator.giveBuff(skillId, durationMs, Collections.singletonList(new Pair<>(BuffStat.MOVE_SLOW, percent))));
     }
 

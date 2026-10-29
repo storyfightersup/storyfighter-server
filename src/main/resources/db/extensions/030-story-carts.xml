@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter gold carts (user 2026-10-29, docs/GOLD-CART.md, server.starter.StoryCart): one row per RUNNING
+         cart whose starter paid a fee. Written in the same transaction as the starter's gold save, deleted when the
+         cart arrives, breaks or a GM ends it. A server stop refunds the fee to the starter's Trade Center pickup box
+         and deletes the row; rows still here at the next start (a crash) are refunded the same way.
+         cartid = the cart's id in memory (restarts at 1 every boot, after the leftovers are refunded), charid = the
+         starter, fee = gold paid, prize = the cart's gold at the start, started = epoch ms.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-030-story-carts" author="storyfighter">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="storycarts"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE TABLE storycarts
+            (
+                cartid  INT    NOT NULL,
+                charid  INT    NOT NULL,
+                world   INT    NOT NULL DEFAULT 0,
+                channel INT    NOT NULL DEFAULT 1,
+                fee     INT    NOT NULL DEFAULT 0,
+                prize   INT    NOT NULL DEFAULT 0,
+                started BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (cartid, charid)
+            );
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

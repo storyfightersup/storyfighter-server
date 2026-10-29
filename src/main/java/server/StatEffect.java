@@ -926,6 +926,11 @@ public class StatEffect implements Cloneable {
 
         int hpchange = calcHPChange(applyfrom, primary, affectedPlayers);
         int mpchange = calcMPChange(applyfrom, primary);
+        // "Wounded" (StoryFighter PvP, user 2026-10-28): a potion's heal is cut by the strongest wound on the drinker
+        if (server.starter.Slice.ON && primary && !skill && sourceid / 10000 == 200) {
+            hpchange = server.skills.StoryWound.heal(applyto, hpchange);
+            mpchange = server.skills.StoryWound.heal(applyto, mpchange);
+        }
         if (primary) {
             // Friendly server: skills cost no items (Shadow Partner, Doom, Meso Explosion's rocks ... need no Summoning Rock)
             boolean freeOfItems = itemCon / 10000 == 400;

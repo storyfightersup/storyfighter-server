@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter (user 2026-10-28): the auto-play panel's Aim box starts OFF for everyone. Runs once: every hero
+         that had Aim saved on (area_info area 31011 = "aim,skills,hp,mp", server.starter.AutoPlaySettings) gets it
+         off; the rest of the line stays. Heroes can switch it on again; that is saved as before.
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-027-aim-off" author="storyfighter">
+        <sql>
+            UPDATE area_info SET info = CONCAT('0', SUBSTRING(info, 2)) WHERE area = 31011 AND info LIKE '1,%';
+        </sql>
+    </changeSet>
+</databaseChangeLog>

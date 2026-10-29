@@ -17,29 +17,37 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Anti-cheat #7 (docs/ANTICHEAT.md): a speed / teleport check for normal hero movement (MovePlayerHandler).
  * The client is public, so it could send any position. Each hero has three "move budgets" in px: sideways, up and
- * down. They refill over real time at a max speed and are capped at max speed x lag time (move_lag_ms), so a burst of
- * late packets (lag) still fits. A move spends from them; a move bigger than what is left is a bad move.
- * Fair to honest play (user 2026-10-24): the speeds are well above the fastest honest move (walk with Swift Wind
- * ~230 px/s, rope ~210 px/s), falls get a big down budget (gravity has no top speed), and these get their own
- * allowance instead of a blind spot:
- *   - Blink / Grapple Arrow end point (MovementSkills.check passed): the next moves may start from that point;
- *   - Double Leap (fast air leap): extra sideways + up budget for a short time;
- *   - server moves (pullPlayer: Chain / pushes / Dome wall / Anchor rope / refused skill move): budgets full, a short
- *     grace time where late packets from the old spot are quietly ignored;
- *   - map change, login, respawn, GM warp (Character.changeMapInternal): a fresh start;
+ * down. They refill over real time at a max speed and are capped at max speed x lag time (move_lag_ms): that is a
+ * sliding window, so a burst of late packets (lag, "in 0 ms") still fits as long as the distance over the window does.
+ * A move spends from them; a move bigger than what is left is a bad move.
+ * Fair to honest play (user 2026-10-24; tuned 2026-10-28 from ~270 honest watch lines, all from the two causes below):
+ *   - Blink / Grapple Arrow (MovementSkills.check passed): the checked path from its start to its end is a free
+ *     "corridor" for move_skill_grant_ms. Every packet on it (the grapple pull sends one point per 11 px tick, the
+ *     blink one jump) costs nothing; a packet near it spends the budgets from the nearest point of the path.
+ *     (Was: the base jumped to the end point and in-flight pull ticks were measured from the start again and again,
+ *     which emptied the budgets: ~190 lines from heroes with Grapple Arrow on auto-play.)
+ *     Skill grants are a bucket (move_skill_burst at once, then 1 per move_skill_refill_ms), and a press that does not
+ *     move (Blink on its client cooldown sends from == to) uses none of it.
+ *   - Map change / respawn / travel (Character.changeMapInternal -> reset): the client keeps sending old-map spots
+ *     until the warp packet arrives. For move_map_settle_ms a packet that does not fit from the spawn spot is such a
+ *     late old-map packet: it is dropped quietly in every mode (it would put the server's hero at the old map's
+ *     portal spot, on the new map). (Was: ~80 lines like "from -1530,190 to 1546,200 in 0 ms".)
+ *   - Double Leap: extra sideways + up budget for a short time (same grant bucket);
+ *   - server moves (STORY_SLIDE: Chain / pushes / Rescue Rope / Sweep Pull, the victim slides ~0.3 s along the path;
+ *     pullPlayer: Dome wall / Anchor rope / Magic Door / refused skill move, instant): the path old spot -> new spot is a corridor, budgets full, move_server_grace_ms where
+ *     packets that still do not fit are accepted (watch) or ignored quietly (enforce);
+ *   - Iron Leash: the enemy drags the hero; its drag speed is added to the sideways refill while the leash holds;
  *   - a same-map portal (the client moves itself to the other portal);
+ *   - fast heroes: refill follows the hero's real move speed % (belt + Swift Wind / Tailwind, see speedPct);
  *   - GMs are not checked.
- * Fast heroes (belt fix, user 2026-10-25): the sideways / up refill speed is at least move_speed_margin_percent % of
- * the hero's own real top walk / rope speed, from the server's own numbers: move speed % = 100 + the worn items' Equip
- * speed (belt base + Safe steps + Reforge-kept steps, exactly what the item packet gives the client) + the SPEED buff
- * (Swift Wind / Tailwind), cut at move_speed_cap_pct like the client (CharStats::set_total). A faster speed counts at
- * once; a slower one only after move_lag_ms (late packets from before a buff ended still fit).
  * Modes (content/balance.json move_check): off, watch (log only, the move stays), enforce (the move is refused: the
- * server keeps the last good spot, the hero is put back with pullPlayer, the move is not shown to others). Never kicks.
- * Log line: "move check [watch|enforce] <name> map <id>: from x,y to x,y in N ms (over: side/up/down px)".
+ * server keeps the last good spot, the hero is put back with pullPlayer at most every 300 ms, the move is not shown to
+ * others). Never kicks, never bans. Every bad move counts one "move" hit for !suspects (Suspects).
+ * Log line: "move check [watch|enforce] <name> map <id>: from x,y to x,y in N ms (over: side/up/down px; ...)".
  * Related up:   MovePlayerHandler (check), MovementSkills.use (skillMove), Character.changeMapInternal (reset),
  *               every server move that sends PacketCreator.pullPlayer (serverMove)
- * Related down: StoryBalance.number (moveCheck, moveSpeed*, moveLagMs, ...), PacketCreator.pullPlayer
+ * Related down: StoryBalance.number (moveCheck, moveSpeed*, moveLagMs, ...), PacketCreator.pullPlayer, Suspects,
+ *               StoryLeash.dragSpeed
  * Pitfall:      the client sends ~125 movement packets a second; keep check() cheap (no allocations on the good path
  *               besides the Point copy).
  */
@@ -50,23 +58,36 @@ public final class MoveCheck {
 
     private MoveCheck() {}
 
+    // a checked path (skill or server move): every spot on it is fine until `until`
+    private static final class Path {
+        int ax, ay, bx, by;
+        long until;
+    }
+
     private static final class State {
         int owner;                 // identity of the Character object: a new login / channel change starts fresh
         int mapId;
         Point last;                // the last good spot
         long lastMs;
         double side, up, down;     // budgets left, px
-        Point grant;               // the spot before a skill / server move: late packets may still start from it
-        long grantUntil;
-        long graceUntil;           // server move: late packets from the old spot are ignored quietly
+        final Path[] paths = {new Path(), new Path()};   // the last two checked paths
+        int nextPath;
+        long graceUntil;           // server move: packets that do not fit are let through (watch) / ignored (enforce)
         long bonusUntil;           // Double Leap: budgets may stay above the cap until then
-        long lastGrantMs;          // skill grants closer than move_skill_gap_ms are not given
+        double grants = -1;        // skill grant bucket (-1 = new: full)
+        long grantsMs;
+        long settleUntil;          // map change: late old-map packets are dropped until then
+        long enteredMs;            // for the log
+        String lastSkill = "-";    // for the log
+        long lastSkillMs, lastServerMs;
         long lastLogMs;
         int quietBad;              // bad moves not logged since the last log line
         long lastSnapMs;
         int topPct = 100;          // the hero's move speed % (highest within the last move_lag_ms)
         long topUntil;
         long pctReadMs;            // last time the gear + buff were read (every PCT_READ_MS)
+        int dragPx;                // Iron Leash drag px/s (highest within the last move_lag_ms)
+        long dragUntil;
     }
 
     private static final Map<Integer, State> STATES = new ConcurrentHashMap<>();
@@ -82,12 +103,16 @@ public final class MoveCheck {
     private static double lagS() { return StoryBalance.number("moveLagMs") / 1000.0; }
     private static int graceMs() { return StoryBalance.number("moveServerGraceMs"); }
     private static int grantMs() { return StoryBalance.number("moveSkillGrantMs"); }
-    private static int grantGapMs() { return StoryBalance.number("moveSkillGapMs"); }
     private static int leapSide() { return StoryBalance.number("moveLeapSidePx"); }
     private static int leapUp() { return StoryBalance.number("moveLeapUpPx"); }
     private static int slack() { return StoryBalance.number("moveSlackPx"); }
     private static int portalPx() { return StoryBalance.number("movePortalPx"); }
     private static int logGapMs() { return StoryBalance.number("moveLogGapMs"); }
+    // 2026-10-28 numbers: an older StoryBalance.img without them must not break movement (fallback, logged once)
+    private static int corridorPx() { return numberOr("moveCorridorPx", 40); }
+    private static int settleMs() { return numberOr("moveMapSettleMs", 2000); }
+    private static int grantBurst() { return numberOr("moveSkillBurst", 3); }
+    private static int grantRefillMs() { return numberOr("moveSkillRefillMs", 300); }
 
     // ---------------------------------------------------------------- the client's walk / rope physics
     // Mirror of OpenStory: Constants TIMESTEP 8 ms (125 ticks a second); Player::get_walkforce = 0.05 + 0.11 x speed/100
@@ -142,17 +167,25 @@ public final class MoveCheck {
         return marginPct;
     }
 
-    private static int numberOr(String node, int fallback) {
+    private static final Map<String, Integer> FALLBACK = new ConcurrentHashMap<>();
+
+    // a node that may be missing in an older data build: the fallback, logged once per node
+    static int numberOr(String node, int fallback) {
+        Integer known = FALLBACK.get(node);
+        if (known != null) {
+            return known;
+        }
         try {
             return StoryBalance.number(node);
         } catch (IllegalStateException e) {
-            log.error("MoveCheck: {} (using {}); run tools/balance/build_balance.py", e.getMessage(), fallback);
+            log.error("anti-cheat: {} (using {}); run tools/balance/build_balance.py", e.getMessage(), fallback);
+            FALLBACK.put(node, fallback);
             return fallback;
         }
     }
 
     private static double sideSpeed(State s) {
-        return Math.max(speedSide(), walkPxPerS(s.topPct) * marginPct() / 100.0);
+        return Math.max(speedSide(), walkPxPerS(s.topPct) * marginPct() / 100.0) + s.dragPx;
     }
 
     private static double upSpeed(State s) {
@@ -165,67 +198,99 @@ public final class MoveCheck {
             return;
         }
         s.pctReadMs = now;
+        int lagMs = StoryBalance.number("moveLagMs");
         int pct = speedPct(chr);
         if (pct >= s.topPct || now > s.topUntil) {
             if (pct >= s.topPct) {
-                s.topUntil = now + StoryBalance.number("moveLagMs");
+                s.topUntil = now + lagMs;
             }
             s.topPct = pct;
+        }
+        int drag = server.skills.StoryLeash.dragSpeed(chr);
+        if (drag >= s.dragPx || now > s.dragUntil) {
+            if (drag > 0) {
+                s.dragUntil = now + lagMs;
+            }
+            s.dragPx = drag;
         }
     }
 
     // ---------------------------------------------------------------- hooks
 
-    // --- Map change / login / respawn / warp: start fresh from the spot the server set (one line)
-    // Related up: Character.changeMapInternal
+    // --- Map change / login / respawn / warp: a fresh start from the spot the server set (one line)
+    // Related up: Character.changeMapInternal (after setPosition(pos), before addPlayer)
+    // Why:        the settle time drops the client's late old-map packets (see the class note).
     public static void reset(Character chr) {
-        STATES.remove(chr.getId());
+        MapleMap map = chr.getMap();
+        Point at = chr.getPosition();
+        if (map == null || at == null) {
+            STATES.remove(chr.getId());
+            return;
+        }
+        long now = System.currentTimeMillis();
+        State old = STATES.get(chr.getId());
+        State s = fresh(System.identityHashCode(chr), map.getId(), at, now);
+        if (old != null) {
+            s.topPct = old.topPct;   // never too low right after a map change
+            s.topUntil = old.topUntil;
+            s.lastLogMs = old.lastLogMs;
+        }
+        s.settleUntil = now + settleMs();
+        STATES.put(chr.getId(), s);
     }
 
     // --- The server moved this hero (pullPlayer) (one line)
     // Related up: SpecialMoveHandler (pull), StoryAttacks.moveVictim, StoryDome.keepPlayer, StoryAnchor.keepPlayer,
-    //             MovementSkills.use (refused move), check (enforce snap)
+    //             StoryDoors, MovementSkills.use (refused move)
     public static void serverMove(Character chr, Point to) {
         State s = STATES.get(chr.getId());
-        if (s == null) {
+        if (s == null || to == null) {
             return;   // the first packet starts from the server's spot anyway
         }
         long now = System.currentTimeMillis();
         synchronized (s) {
-            jump(s, to, now, graceMs());
+            addPath(s, s.last, to, now + graceMs());
+            s.last = new Point(to);
             s.graceUntil = now + graceMs();
+            s.lastServerMs = now;
             fill(s);
         }
     }
 
     // --- A story movement skill passed MovementSkills.check (one line)
-    // Related up: MovementSkills.use. kind = info.move(): "blink" / "grapple" (to = the checked end point), "leap".
-    public static void skillMove(Character chr, String kind, Point to) {
+    // Related up: MovementSkills.use. kind = info.move(): "blink" / "grapple" (from -> to = the checked path), "leap".
+    public static void skillMove(Character chr, String kind, Point from, Point to) {
         State s = STATES.get(chr.getId());
         if (s == null) {
             return;
         }
+        boolean leap = "leap".equals(kind);
+        if (!leap && (from == null || to == null || from.equals(to))) {
+            return;   // a press that did not move (Blink on its client cooldown): no grant used
+        }
         long now = System.currentTimeMillis();
         synchronized (s) {
-            if (now - s.lastGrantMs < grantGapMs()) {
-                return;   // faster than an honest hero can cast it: the move is checked as a normal move
+            boolean granted = takeGrant(s, now);
+            s.lastSkill = granted ? kind : kind + " (over the grant rate, no path)";   // for the log line
+            s.lastSkillMs = now;
+            if (!granted) {
+                return;   // faster than an honest hero can cast: the move is checked as a normal move
             }
-            s.lastGrantMs = now;
-            if ("leap".equals(kind)) {
+            if (leap) {
                 refill(s, now);
                 s.side += leapSide();
                 s.up += leapUp();
                 s.bonusUntil = now + grantMs();
-            } else if (to != null) {
-                jump(s, to, now, grantMs());
+            } else {
+                addPath(s, from, to, now + grantMs());
             }
         }
     }
 
     // --- Is the move from `from` (server's spot before the packet) to `to` (the packet's last spot) possible? (one line)
     // Related up: MovePlayerHandler, after updatePosition set `to`
-    // Returns true = keep the move; false = enforce mode refused it (the caller must not show it to others; the
-    //         hero's spot is already set back here).
+    // Returns true = keep the move; false = refused (the caller must not show it to others; the hero's spot is
+    //         already set back here). False in watch mode only for late old-map packets after a map change.
     public static boolean check(Character chr, Point from, Point to) {
         int mode = mode();
         if (mode == OFF || chr.isGM() || from == null || to == null) {
@@ -244,40 +309,48 @@ public final class MoveCheck {
             readSpeed(chr, s, now);
             refill(s, now);
 
-            // 1. from the last good spot
+            // 1. on a checked path (Blink / Grapple Arrow / server move): free
+            if (onPath(s, to, now)) {
+                s.last = new Point(to);
+                s.lastMs = now;
+                return true;
+            }
+            // 2. from the last good spot
             double[] over = overBy(s, s.last, to);
             if (over == null) {
                 accept(s, s.last, to, now);
                 return true;
             }
-            // 2. a late packet from the spot before a skill / server move (it was already in flight)
-            if (s.grant != null && now <= s.grantUntil && overBy(s, s.grant, to) == null) {
-                Point keep = s.last;
-                accept(s, s.grant, to, now);
-                s.last = keep;   // the newer spot stays the base; only the in-flight packet passes
+            // 3. a late old-map packet right after a map change: drop it quietly (every mode)
+            if (now <= s.settleUntil) {
+                chr.setPosition(new Point(from));
+                return false;
+            }
+            // 4. near a checked path: from its nearest point
+            Point near = nearestOnPath(s, to, now);
+            if (near != null && overBy(s, near, to) == null) {
+                accept(s, near, to, now);
                 return true;
             }
-            // 3. a same-map portal
+            // 5. a same-map portal
             if (map != null && samePortal(map, s.last, to)) {
                 fill(s);
                 accept(s, s.last, to, now);
                 return true;
             }
-            // 4. anything else right after a server move: ignore quietly, the client is still catching up
+            // 6. right after a server move: the client is still catching up
             if (now <= s.graceUntil) {
                 if (mode == ENFORCE) {
                     chr.setPosition(new Point(from));
                     return false;
                 }
+                acceptClamped(s, to, now);
                 return true;
             }
 
             report(chr, s, mode, mapId, from, to, dt, over, now);
             if (mode == WATCH) {
-                accept(s, s.last, to, now);   // budgets go to 0, not below (one glitch does not spam the log)
-                s.side = Math.max(0, s.side);
-                s.up = Math.max(0, s.up);
-                s.down = Math.max(0, s.down);
+                acceptClamped(s, to, now);   // budgets go to 0, not below (one glitch does not spam the log)
                 return true;
             }
             // enforce: keep the last good spot, put the hero back there (not too often)
@@ -286,7 +359,6 @@ public final class MoveCheck {
             if (now - s.lastSnapMs >= 300) {
                 s.lastSnapMs = now;
                 chr.sendPacket(PacketCreator.pullPlayer(back));
-                jump(s, back, now, graceMs());
                 s.graceUntil = now + graceMs();
             }
             return false;
@@ -306,12 +378,71 @@ public final class MoveCheck {
         s.mapId = mapId;
         s.last = new Point(at);
         s.lastMs = now;
-        s.grant = null;
-        s.grantUntil = 0;
+        s.enteredMs = now;
+        for (Path p : s.paths) {
+            p.until = 0;
+        }
         s.graceUntil = 0;
         s.bonusUntil = 0;
+        s.settleUntil = 0;
         s.pctReadMs = 0;           // read the gear + buff again on the next packet (topPct stays: never too low)
         fill(s);
+    }
+
+    private static boolean takeGrant(State s, long now) {
+        int burst = Math.max(1, grantBurst());
+        if (s.grants < 0) {
+            s.grants = burst;
+            s.grantsMs = now;
+        }
+        s.grants = Math.min(burst, s.grants + (now - s.grantsMs) / (double) Math.max(1, grantRefillMs()));
+        s.grantsMs = now;
+        if (s.grants >= 1) {
+            s.grants -= 1;
+            return true;
+        }
+        return false;
+    }
+
+    private static void addPath(State s, Point a, Point b, long until) {
+        Path p = s.paths[s.nextPath];
+        s.nextPath = (s.nextPath + 1) % s.paths.length;
+        p.ax = a.x;
+        p.ay = a.y;
+        p.bx = b.x;
+        p.by = b.y;
+        p.until = until;
+    }
+
+    // the nearest spot to `to` on any active path, or null
+    private static Point nearestOnPath(State s, Point to, long now) {
+        Point best = null;
+        double bestD = Double.MAX_VALUE;
+        for (Path p : s.paths) {
+            if (now > p.until) {
+                continue;
+            }
+            double dx = p.bx - p.ax, dy = p.by - p.ay;
+            double len2 = dx * dx + dy * dy;
+            double t = len2 <= 0 ? 0 : ((to.x - p.ax) * dx + (to.y - p.ay) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            int nx = (int) Math.round(p.ax + t * dx), ny = (int) Math.round(p.ay + t * dy);
+            double d = to.distanceSq(nx, ny);
+            if (d < bestD) {
+                bestD = d;
+                best = new Point(nx, ny);
+            }
+        }
+        return best;
+    }
+
+    private static boolean onPath(State s, Point to, long now) {
+        if (now > s.paths[0].until && now > s.paths[1].until) {
+            return false;   // the common case: no allocation
+        }
+        Point near = nearestOnPath(s, to, now);
+        int r = corridorPx();
+        return near != null && near.distanceSq(to) <= (double) r * r;
     }
 
     private static void fill(State s) {
@@ -350,13 +481,6 @@ public final class MoveCheck {
         return new double[] {Math.max(0, side), Math.max(0, up), Math.max(0, down)};
     }
 
-    // the base jumps to a checked spot (skill end, server move); the old spot stays valid for in-flight packets
-    private static void jump(State s, Point to, long now, int ms) {
-        s.grant = s.last;
-        s.grantUntil = now + ms;
-        s.last = new Point(to);
-    }
-
     // spend the move from `origin` (slack may take a budget a little below 0: clamp)
     private static void accept(State s, Point origin, Point to, long now) {
         s.side = Math.max(0, s.side - Math.abs(to.x - origin.x));
@@ -368,6 +492,13 @@ public final class MoveCheck {
         }
         s.last = new Point(to);
         s.lastMs = now;
+    }
+
+    private static void acceptClamped(State s, Point to, long now) {
+        accept(s, s.last, to, now);
+        s.side = Math.max(0, s.side);
+        s.up = Math.max(0, s.up);
+        s.down = Math.max(0, s.down);
     }
 
     // the hero stood at a portal that leads to this same map, and is now at a portal of this map
@@ -382,15 +513,21 @@ public final class MoveCheck {
     }
 
     private static void report(Character chr, State s, int mode, int mapId, Point from, Point to, long dt, double[] over, long now) {
+        Suspects.hit(chr, Suspects.MOVE);
         if (now - s.lastLogMs < logGapMs()) {
             s.quietBad++;
             return;
         }
-        log.warn("move check [{}] {} map {}: from {},{} to {},{} in {} ms (over: side {} up {} down {} px; last good {},{}; speed {}%){}",
+        log.warn("move check [{}] {} map {}: from {},{} to {},{} in {} ms (over: side {} up {} down {} px; last good {},{}; speed {}%{}; on map {} ms, last skill {} {}, last server move {}){}",
                 mode == ENFORCE ? "enforce" : "watch", chr.getName(), mapId, from.x, from.y, to.x, to.y, dt,
                 Math.round(over[0]), Math.round(over[1]), Math.round(over[2]), s.last.x, s.last.y, s.topPct,
-                s.quietBad > 0 ? " +" + s.quietBad + " more since the last line" : "");
+                s.dragPx > 0 ? ", leash drag " + s.dragPx : "", now - s.enteredMs, s.lastSkill, ago(s.lastSkillMs, now),
+                ago(s.lastServerMs, now), s.quietBad > 0 ? " +" + s.quietBad + " more since the last line" : "");
         s.lastLogMs = now;
         s.quietBad = 0;
+    }
+
+    private static String ago(long at, long now) {
+        return at == 0 ? "never" : (now - at) + " ms ago";
     }
 }

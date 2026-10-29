@@ -54,8 +54,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * Items keep every stat and upgrade step: a listed item is a normal inventoryitems row (ItemFactory.STORY_TRADE,
  * characterid = minus the listing id, itemKey); moving it to a pickup box is one UPDATE of type + characterid (moveItemToBox).
  *
- * Related up:   OpenStory UITradeCenter (StoryTradePacket, opcode STORY_TRADE 0x108)
- * Related down: STORY_TRADE 0x19F answers (layout in docs/TRADE-CENTER.md), db extension 010-trade-center.xml
+ * Related up:   OpenStory UITradeCenter (StoryTradePacket, opcode STORY_TRADE 0x18D)
+ * Related down: STORY_TRADE 0x51B answers (layout in docs/TRADE-CENTER.md), db extension 010-trade-center.xml
  * Pitfall:      lock order is LOCK -> synchronized(chr) -> inventory lock, the same as Character.saveCharToDB
  *               (chr -> inventory), so the autosave can never run between our check and our commit.
  */
@@ -163,7 +163,7 @@ public final class TradeCenter {
 
     // ------------------------------------------------------------------ packet handler
 
-    /** Packet STORY_TRADE (0x108): byte op, then the op's fields (docs/TRADE-CENTER.md). */
+    /** Packet STORY_TRADE (0x18D): byte op, then the op's fields (docs/TRADE-CENTER.md). */
     public static final class Handler extends AbstractPacketHandler {
         @Override
         public void handlePacket(InPacket p, Client c) {

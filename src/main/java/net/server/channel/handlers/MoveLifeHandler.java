@@ -163,18 +163,24 @@ public final class MoveLifeHandler extends AbstractMovementPacketHandler {
             server.skills.StoryDome.keepMonster(monster);   // a Dome's monsters stay in, others stay out
             server.skills.StoryPlace.checkMonster(monster, serverStartPos);   // never a spot inside the ground  // Thanks Doodle & ZERO傑洛 for noticing sponge-based bosses moving out of stage in case of no-offset applied
             long movementDataLength = p.getPosition() - movementDataStart; //how many bytes were read by updatePosition
-            p.seek(movementDataStart);
-            server.skills.StoryPush.moved(monster, p);   // a knock-back (Blast Arrow) came to rest: log the landing
+            // anti-cheat #23 (server.anticheat.MobMoveCheck): the report must fit the monster's own speed (+ our pushes /
+            // pulls). False only in enforce: the server keeps its spot and nobody sees the move.
+            if (!server.anticheat.MobMoveCheck.check(player, monster, serverStartPos, monster.getPosition(), aggro)) {
+                monster.setPosition(new Point(serverStartPos));
+            } else {
+                p.seek(movementDataStart);
+                server.skills.StoryPush.moved(monster, p);   // a knock-back (Blast Arrow) came to rest: log the landing
 
-            if (YamlConfig.config.server.USE_DEBUG_SHOW_RCVD_MVLIFE) {
-                log.debug("{} rawAct: {}, opt: {}, skillId: {}, skillLv: {}, allowSkill: {}, mobMp: {}",
-                        isSkill ? "SKILL" : (isAttack ? "ATTCK" : ""), rawActivity, pOption, useSkillId,
-                        useSkillLevel, nextMovementCouldBeSkill, mobMp);
+                if (YamlConfig.config.server.USE_DEBUG_SHOW_RCVD_MVLIFE) {
+                    log.debug("{} rawAct: {}, opt: {}, skillId: {}, skillLv: {}, allowSkill: {}, mobMp: {}",
+                            isSkill ? "SKILL" : (isAttack ? "ATTCK" : ""), rawActivity, pOption, useSkillId,
+                            useSkillLevel, nextMovementCouldBeSkill, mobMp);
+                }
+
+                map.broadcastMessage(player, PacketCreator.moveMonster(objectid, nextMovementCouldBeSkill, rawActivity, useSkillId, useSkillLevel, pOption, startPos, p, movementDataLength), serverStartPos);
+                //updatePosition(res, monster, -2); //does this need to be done after the packet is broadcast?
+                map.moveMonster(monster, monster.getPosition());
             }
-
-            map.broadcastMessage(player, PacketCreator.moveMonster(objectid, nextMovementCouldBeSkill, rawActivity, useSkillId, useSkillLevel, pOption, startPos, p, movementDataLength), serverStartPos);
-            //updatePosition(res, monster, -2); //does this need to be done after the packet is broadcast?
-            map.moveMonster(monster, monster.getPosition());
         } catch (EmptyMovementException e) {
         }
 

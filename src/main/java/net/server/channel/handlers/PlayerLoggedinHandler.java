@@ -28,6 +28,7 @@ import server.starter.DayCycle;
 import server.starter.PetLootFilter;
 import server.starter.Slice;
 import server.starter.StoryBalance;
+import server.starter.StoryCart;
 import server.starter.StoryCities;
 import server.starter.StoryCitizens;
 import server.starter.StoryItems;
@@ -425,6 +426,7 @@ public final class PlayerLoggedinHandler extends AbstractPacketHandler {
                 StoryBounty.login(player, newcomer);   // Wanted Board data; a wanted hero gets a chat line (docs/BOUNTY.md)
                 StoryCities.login(player);   // alliance bank + Siege + owned cities (docs/CITIES.md op 0)
                 StoryCitizens.login(player, newcomer);   // citizenships, fee, playtime clock (docs/CITIZENS.md op 4 + op 5)
+                StoryCart.login(player);   // this channel's gold carts for the World Map (docs/GOLD-CART.md op 4)
                 StorySkills.numpadPickup(player);   // number pad 0 = Pickup once for older heroes (user 2026-10-23)
                 StorySkills.mapKeys(player);   // W = World Map, M = Mini Map once for older heroes (user 2026-10-24)
                 StorySkills.keyTip(player);   // no auto keys (user 2026-10-23): a tip while no story skill is on a key

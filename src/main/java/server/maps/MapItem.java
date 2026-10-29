@@ -81,6 +81,31 @@ public class MapItem extends AbstractMapObject {
         this.playerDrop = playerDrop;
     }
 
+    // --- StoryFighter gold cart gold (docs/GOLD-CART.md): gold with NO owner (free for all, type 2), but only heroes of
+    //     level <= levelMax may pick it up (Character.pickupItem) (one line)
+    // Related up:   MapleMap.spawnCartGold (server.starter.StoryCart)
+    // Pitfall:      no owner client (null): getOwnerClient returns null for it.
+    private int pickupLevelMax;
+
+    public MapItem(int meso, Point position, MapObject dropper, int levelMax) {
+        setPosition(position);
+        this.item = null;
+        this.dropper = dropper;
+        this.character_ownerid = 0;
+        this.party_ownerid = -1;
+        this.partyDrop = false;
+        this.ownerClient = null;
+        this.meso = meso;
+        this.type = 2;
+        this.playerDrop = false;
+        this.pickupLevelMax = Math.max(0, levelMax);
+    }
+
+    /** Gold cart gold: the highest hero level that may pick it up; 0 = any level (every other drop). */
+    public final int getPickupLevelMax() {
+        return pickupLevelMax;
+    }
+
     public final Item getItem() {
         return item;
     }
@@ -165,7 +190,7 @@ public class MapItem extends AbstractMapObject {
     }
 
     public final Client getOwnerClient() {
-        return (ownerClient.isLoggedIn() && !ownerClient.getPlayer().isAwayFromWorld()) ? ownerClient : null;
+        return (ownerClient != null && ownerClient.isLoggedIn()&& !ownerClient.getPlayer().isAwayFromWorld()) ? ownerClient : null;
     }
 
     public final int getMeso() {

@@ -2,22 +2,19 @@ package net.netty;
 
 import client.Client;
 import config.YamlConfig;
-import constants.net.ServerConstants;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.timeout.IdleStateHandler;
-import net.encryption.ClientCyphers;
-import net.encryption.InitializationVector;
-import net.encryption.PacketCodec;
+import net.encryption.WireFrameCodec;
+import net.encryption.WireHandshakeHandler;
+import net.encryption.WireKey;
 import net.packet.logging.InPacketLogger;
 import net.packet.logging.OutPacketLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import tools.PacketCreator;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicLong;
@@ -42,21 +39,17 @@ public abstract class ServerChannelInitializer extends ChannelInitializer<Socket
         return remoteAddress;
     }
 
+    /**
+     * StoryFighter wire v1 (docs/PROTOCOL.md): Idle -> WireHandshake (removes itself after the ServerHello) ->
+     * WireFrames (AES-256-GCM frames <-> opcode + body packets) -> Client. The client speaks first; the server sends
+     * nothing until a valid ClientHello arrived.
+     */
     void initPipeline(SocketChannel socketChannel, Client client) {
-        final InitializationVector sendIv = InitializationVector.generateSend();
-        final InitializationVector recvIv = InitializationVector.generateReceive();
-        writeInitialUnencryptedHelloPacket(socketChannel, sendIv, recvIv);
-        setUpHandlers(socketChannel.pipeline(), sendIv, recvIv, client);
-    }
-
-    private void writeInitialUnencryptedHelloPacket(SocketChannel socketChannel, InitializationVector sendIv, InitializationVector recvIv) {
-        socketChannel.writeAndFlush(Unpooled.wrappedBuffer(PacketCreator.getHello(ServerConstants.VERSION, sendIv, recvIv).getBytes()));
-    }
-
-    private void setUpHandlers(ChannelPipeline pipeline, InitializationVector sendIv, InitializationVector recvIv,
-                               Client client) {
+        final ChannelPipeline pipeline = socketChannel.pipeline();
+        final WireFrameCodec frames = new WireFrameCodec();
         pipeline.addLast("IdleStateHandler", new IdleStateHandler(0, 0, IDLE_TIME_SECONDS));
-        pipeline.addLast("PacketCodec", new PacketCodec(ClientCyphers.of(sendIv, recvIv)));
+        pipeline.addLast("WireHandshake", new WireHandshakeHandler(WireKey.identity(), frames));
+        pipeline.addLast("WireFrames", frames);
         pipeline.addLast("Client", client);
 
         if (LOG_PACKETS) {

@@ -11,8 +11,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * faster than a person. Each is a bucket: up to "burst" actions at once (packets that waited in lag arrive together),
  * then one more every "refill" ms. Numbers in content/balance.json ("_rates").
  *   #11 attacks (monster attack packets, CloseRange / Ranged / MagicDamageHandler): attack_rate_check off / watch
- *       (log only) / enforce (the packet is ignored; never a kick). The fastest honest swing is about 450 ms (the
- *       PvP floor in Character.acceptPvpSwing); the bucket allows 1 per attack_min_gap_ms + attack_burst at once.
+ *       (log only) / enforce (the packet is ignored, the client gets enableActions; never a kick). Tuned 2026-10-28:
+ *       the bucket follows the hero's OWN swing gap, the same one the client waits (WeaponSpeed.attackGapMs =
+ *       Combat::damage_gap_ticks: weapon speed, Swift Wind / Tailwind / Anchor Blade through BOOSTER, worn speed
+ *       steps + Necklace, 480..1100 ms). Refill: 1 per gap x (100 - attack_gap_tolerance_percent)% (never below
+ *       attack_min_gap_ms); room: attack_burst + attack_lag_ms / that gap, so a lag stall or a client frame hitch that
+ *       sends several swings at once ("in 0 ms") fits, and Sniper Shot / Chain (sent after the aim / lasso) right
+ *       before the next swing fit too. A faster gap counts at once, a slower one only after attack_lag_ms (late
+ *       packets from before a buff ended). (Was 5 at once + 1 per 300 ms: a 3 s stall sent 6+ swings at once.)
  *   #12 World chat (MultiChatHandler): chat_world_burst at once, then 1 per chat_world_refill_ms; refused lines get a
  *       short message. Map / party / whisper keep the old 200 ms floor (local, and humans type slower anyway).
  *   #13 Trade Center reads (Buy list, My Trades; TradeCenter.Handler): trade_read_burst at once, then 1 per
@@ -23,14 +29,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *       from where it would have been, so over time it is never more than 1 per gap. The client keeps the same gap
  *       (Player::use_item), so an honest client is not refused.
  * Log lines (at most one per hero per kind per attack_log_gap_ms):
- *   "attack rate [watch] Name map 100010000: skill 10001, 7 over the limit in 2300 ms (allowed 5 at once + 1 per 300 ms)"
+ *   "attack rate [watch] Name map 100010000: skill 10001, 7 over the limit in 2300 ms (swing gap 600 ms: allowed 8 at once + 1 per 540 ms)"
  *   "world chat refused: Name map X: 3 over 4 at once + 1 per 2000 ms"
  *   "trade read refused: Name map X: 12 over 10 at once + 1 per 250 ms"
  *   "potion refused: Name map X: item 2000000, 4 too fast in 900 ms (last 120 ms ago, 1 per 500 ms)"
  * (the count is the refusals since the last line of that kind, so the first line of a burst says 1)
  * Related up:   CloseRangeDamageHandler, RangedAttackHandler, MagicDamageHandler, MultiChatHandler,
  *               TradeCenter.Handler, Client.disconnectInternal (forget)
- * Related down: StoryBalance.number (attackRateCheck, attackMinGapMs, attackBurst, attackLogGapMs, chatWorld*,
+ * Related down: StoryBalance.number (attackRateCheck, attackMinGapMs, attackBurst, attackGapTolerancePercent,
+ *               attackLagMs, attackLogGapMs, chatWorld*,
  *               tradeRead*, potionMinGapMs, potionLagSlackMs)
  */
 public final class ActionRate {
@@ -44,6 +51,8 @@ public final class ActionRate {
         long firstOverMs;     // first refusal since the last log line (for "N in T ms")
         int over;             // refusals since the last log line
         long lastLogMs;
+        int gapMs;            // attacks only: the fastest swing gap within the last attack_lag_ms (0 = not read yet)
+        long gapUntil;
     }
 
     private static final class State {
@@ -93,6 +102,7 @@ public final class ActionRate {
     }
 
     // --- #11 One monster attack packet. False = ignore it (enforce only) (one line)
+    // Related down: WeaponSpeed.attackGapMs (the client's own swing gap), Suspects (one "attack" hit per extra packet)
     public static boolean attack(Character chr, int skillId) {
         try {
             int mode = StoryBalance.number("attackRateCheck");
@@ -100,17 +110,29 @@ public final class ActionRate {
                 return true;
             }
             int burst = StoryBalance.number("attackBurst");
-            int gap = StoryBalance.number("attackMinGapMs");
+            int floor = StoryBalance.number("attackMinGapMs");
+            int tolerance = Math.max(0, Math.min(50, MoveCheck.numberOr("attackGapTolerancePercent", 10)));
+            int lagMs = Math.max(0, MoveCheck.numberOr("attackLagMs", 3000));
             Bucket b = state(chr).attack;
             long now = System.currentTimeMillis();
+            int gap = server.starter.WeaponSpeed.attackGapMs(chr);
             synchronized (b) {
-                if (take(b, burst, gap, now)) {
+                if (b.gapMs == 0 || gap <= b.gapMs || now > b.gapUntil) {
+                    if (b.gapMs == 0 || gap <= b.gapMs) {
+                        b.gapUntil = now + lagMs;
+                    }
+                    b.gapMs = gap;
+                }
+                int refill = Math.max(Math.max(1, floor), b.gapMs * (100 - tolerance) / 100);
+                int room = burst + lagMs / refill;
+                if (take(b, room, refill, now)) {
                     return true;
                 }
+                Suspects.hit(chr, Suspects.ATTACK);
                 if (logNow(b, now)) {
-                    log.warn("attack rate [{}] {} map {}: skill {}, {} over the limit in {} ms (allowed {} at once + 1 per {} ms)",
+                    log.warn("attack rate [{}] {} map {}: skill {}, {} over the limit in {} ms (swing gap {} ms: allowed {} at once + 1 per {} ms)",
                             mode == MoveCheck.ENFORCE ? "enforce" : "watch", chr.getName(), chr.getMapId(), skillId,
-                            b.over, now - b.firstOverMs, burst, gap);
+                            b.over, now - b.firstOverMs, b.gapMs, room, refill);
                     b.over = 0;
                 }
             }

@@ -486,10 +486,11 @@ public class Character extends AbstractCharacterObject {
         ret.accountid = c.getAccID();
         ret.buddylist = new BuddyList(20);
         ret.maplemount = null;
-        ret.getInventory(InventoryType.EQUIP).setSlotLimit(24);
-        ret.getInventory(InventoryType.USE).setSlotLimit(24);
-        ret.getInventory(InventoryType.SETUP).setSlotLimit(24);
-        ret.getInventory(InventoryType.ETC).setSlotLimit(24);
+        // StoryFighter: 48 slots per bag tab (user 2026-10-28, was 24); db extension 029 doubled existing heroes
+        ret.getInventory(InventoryType.EQUIP).setSlotLimit(48);
+        ret.getInventory(InventoryType.USE).setSlotLimit(48);
+        ret.getInventory(InventoryType.SETUP).setSlotLimit(48);
+        ret.getInventory(InventoryType.ETC).setSlotLimit(48);
 
         // Select a keybinding method
         int[] selectedKey;
@@ -2085,10 +2086,23 @@ public class Character extends AbstractCharacterObject {
                 sendPacket(PacketCreator.enableActions());
                 return;
             }
+            // Gold cart gold: only heroes up to the route's level cap (server.starter.StoryCart, docs/GOLD-CART.md)
+            int cartCap = mapitem.getPickupLevelMax();
+            if (cartCap > 0 && getLevel() > cartCap) {
+                if (petIndex < 0) {
+                    server.starter.StoryCart.pickupRefused(this, cartCap);
+                    server.anticheat.PickupLog.refused(this, mapitem, "cart cap", "level " + getLevel() + " > " + cartCap);
+                }
+                sendPacket(PacketCreator.enableActions());
+                return;
+            }
 
             List<Character> mpcs = new LinkedList<>();
             if (mapitem.getMeso() > 0 && !mapitem.isPickedUp()) {
                 mpcs = getPartyMembersOnSameMap();
+                if (cartCap > 0) {
+                    mpcs.removeIf(m -> m.getLevel() > cartCap);   // party members over the cap get no share of cart gold
+                }
             }
 
             ScriptedItem itemScript = null;
@@ -2179,11 +2193,10 @@ public class Character extends AbstractCharacterObject {
 
                     this.getMap().pickItemDrop(pickupPacket, mapitem);
                 } else if (!hasSpaceInventory) {
-                    if (petIndex < 0) {
-                        server.anticheat.PickupLog.refused(this, mapitem, "bag full", null);
-                    }
+                    // one clear "Your Equip bag is full." per tab every few seconds (PickupLog.bagFull), not the old
+                    // red line on every try of a held Pickup key or the pet; the log line only for hand pickups
+                    server.anticheat.PickupLog.bagFull(this, mapitem, petIndex >= 0);
                     sendPacket(PacketCreator.getInventoryFull());
-                    sendPacket(PacketCreator.getShowInventoryFull());
                 }
             } finally {
                 if (!pickedBefore && mapitem.isPickedUp() && mapitem.getItem() != null) {
@@ -2803,6 +2816,10 @@ public class Character extends AbstractCharacterObject {
     private long lastStageLockAt;
 
     public void giveDebuff(final Disease disease, MobSkill skill, long duration, int shown) {
+        // StoryFighter Anchor Blade (user 2026-10-29): a planted hero cannot be stunned, frozen or slowed
+        if ((disease == Disease.STUN || disease == Disease.SLOW) && server.skills.StoryAnchor.immune(this)) {
+            return;
+        }
         // While this stun (or freeze) is on, another one does not start and does not make it last longer.
         if (disease == Disease.STUN && hasDisease(Disease.STUN)) {
             return;
@@ -7855,6 +7872,7 @@ public class Character extends AbstractCharacterObject {
         lastDeathtime = Server.getInstance().getCurrentTime();
         server.starter.PetPickup.death(this);   // StoryFighter: death pauses pet pickup (user 2026-10-24)
         server.skills.StoryAid.death(this);     // StoryFighter party skills on them end; their Roar / Mending Circle stop
+        server.skills.StoryWound.death(this);   // StoryFighter "Wounded": potion blocks and the cracked-potion mark end
 
         // A stage defeat has no death penalty here: PvpPenalty already took its share (EXP to the killer, no item drop). The grave stays until they choose the city.
         if (!pvpDown) {

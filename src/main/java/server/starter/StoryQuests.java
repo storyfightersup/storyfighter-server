@@ -19,6 +19,7 @@ import server.life.LifeFactory;
 import server.life.Monster;
 import server.maps.MapleMap;
 import tools.DatabaseConnection;
+import tools.Pair;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -27,6 +28,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,9 +50,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * fast double click or a second packet finds the quest no longer taken and pays nothing. Accepting twice only keeps
  * one row (primary key + INSERT IGNORE); accepting pays nothing.
  *
- * Quest tracker (user 2026-10-25): send() tells the client which quests are taken (STORY_QUESTS 0x1AA) at login, after
+ * Quest tracker (user 2026-10-25): send() tells the client which quests are taken (STORY_QUESTS 0x515) at login, after
  * accept and after turn in. The client counts the items in its own bag for "12/20" (exact: every bag change already
  * reaches it); the turn-in here still counts the real items and stays the only authority.
+ *
+ * Batch buttons (user 2026-10-28): "Accept all quests on this map" (map screen) and "Turn in all ready quests" (first
+ * screen). Both only loop over the single accept() / turnInPaid() below, so prizes, item removal, checks and tracker
+ * packets are exactly the same as one by one. Turn in all checks Use bag room for the chests and the gold cap for the
+ * whole batch first and then turns in only the first ones that fit (content order).
  */
 public final class StoryQuests {
     private static final Logger log = LoggerFactory.getLogger(StoryQuests.class);
@@ -76,6 +83,12 @@ public final class StoryQuests {
     private static final int ACCEPT = 1;
     private static final int TURN_IN = 2;
     private static final int AGAIN = 3;
+    private static final int TURN_IN_ALL = 800;   // first screen (zone picks are 0..zones-1)
+    private static final int ACCEPT_ALL = 801;    // map screen (quest picks are 0..quests-1)
+
+    /** What one turn-in did: paid = the prize was given; chestId 0 = no chest; chestInBag false = it fell on the ground. */
+    private record Paid(String text, boolean paid, int chestId, boolean chestInBag) {
+    }
 
     private static volatile Tables tables;
     private static final Map<Integer, Session> sessions = new ConcurrentHashMap<>();
@@ -235,6 +248,9 @@ public final class StoryQuests {
         String note = null;
         switch (s.state) {
             case ZONES -> {
+                if (selection == TURN_IN_ALL) {
+                    return render(chr, s, turnInAll(chr));
+                }
                 if (selection < 0 || selection >= t.zones().size()) {
                     return end(chr);
                 }
@@ -245,6 +261,8 @@ public final class StoryQuests {
                 List<Quest> list = inZone(t, s.zone);
                 if (selection == BACK) {
                     s.state = State.ZONES;
+                } else if (selection == ACCEPT_ALL) {
+                    note = acceptAll(chr, list);
                 } else if (selection >= 0 && selection < list.size()) {
                     s.mob = list.get(selection).mob();
                     s.state = State.QUEST;
@@ -351,9 +369,18 @@ public final class StoryQuests {
     //               take the items -> pay. A second click waits for the lock and then finds the quest not taken.
     // Pitfall:      returns a text starting with "#e" only when it paid (next() moves to the DONE screen then).
     private static String turnIn(Character chr, Quest q) {
+        Paid p = turnInPaid(chr, q);
+        return p == null ? null : p.text();
+    }
+
+    private static Paid fail(String text) {
+        return new Paid(text, false, 0, false);
+    }
+
+    private static Paid turnInPaid(Character chr, Quest q) {
         Set<Integer> set = taken(chr);
         if (set == null) {
-            return "#rSorry, I can't find my list right now. Please try again.#k";
+            return fail("#rSorry, I can't find my list right now. Please try again.#k");
         }
         Client c = chr.getClient();
         synchronized (set) {
@@ -361,15 +388,15 @@ public final class StoryQuests {
                 return null;
             }
             if ((long) chr.getMeso() + q.gold() > Integer.MAX_VALUE) {
-                return "#rYour gold purse is full. Spend some gold first.#k";
+                return fail("#rYour gold purse is full. Spend some gold first.#k");
             }
             Inventory etc = chr.getInventory(InventoryType.ETC);
             etc.lockInventory();
             try {
                 int before = have(chr, q.item());
                 if (before < q.count()) {
-                    return "#rYou have " + before + "/" + q.count() + " " + itemName(q.item()) + ". Bring me "
-                            + (q.count() - before) + " more.#k";
+                    return fail("#rYou have " + before + "/" + q.count() + " " + itemName(q.item()) + ". Bring me "
+                            + (q.count() - before) + " more.#k");
                 }
                 try (Connection con = DatabaseConnection.getConnection();
                      PreparedStatement ps = con.prepareStatement(
@@ -379,7 +406,7 @@ public final class StoryQuests {
                     ps.executeUpdate();
                 } catch (SQLException e) {
                     log.error("story quests {}: could not close quest {}, nothing taken or paid", chr.getName(), q.mob(), e);
-                    return "#rSorry, something went wrong. Please try again.#k";
+                    return fail("#rSorry, something went wrong. Please try again.#k");
                 }
                 set.remove(q.mob());
                 send(chr);
@@ -390,7 +417,7 @@ public final class StoryQuests {
                     log.warn("story quests {}: quest {} took {} of {} items, no prize", chr.getName(), q.mob(), removed,
                             q.count());
                     if (removed < q.count()) {
-                        return "#rSomething went wrong with your bag. Please talk to me again.#k";
+                        return fail("#rSomething went wrong with your bag. Please talk to me again.#k");
                     }
                 }
             } finally {
@@ -401,12 +428,14 @@ public final class StoryQuests {
             chr.gainMeso(q.gold(), true, false, true);
             // one quest chest by the monster's level (user 2026-10-25); a full Use bag puts it at the hero's feet
             String chestText = "";
+            boolean inBag = false;
             int chestId = StoryChests.chestFor(mobLevel(q.mob()));
             if (chestId > 0) {
                 Item chest = new Item(chestId, (short) 0, (short) 1);
                 String name = itemName(chestId);
                 if (InventoryManipulator.checkSpace(c, chestId, 1, "") && InventoryManipulator.addFromDrop(c, chest, true)) {
                     chestText = "\r\nAnd a #b" + name + "#k! Double-click it in your Use bag to open it.";
+                    inBag = true;
                 } else {
                     MapleMap map = chr.getMap();
                     if (map != null) {
@@ -417,8 +446,162 @@ public final class StoryQuests {
             }
             log.info("story quests {} ({}): turned in quest {} ({} x{}): {} EXP, {} gold, chest {}", chr.getName(),
                     chr.getId(), q.mob(), q.item(), q.count(), q.exp(), q.gold(), chestId);
-            return "#eThank you!#n You got #b" + String.format("%,d", q.exp()) + " EXP#k and #b"
-                    + String.format("%,d", q.gold()) + " gold#k." + chestText;
+            return new Paid("#eThank you!#n You got #b" + String.format("%,d", q.exp()) + " EXP#k and #b"
+                    + String.format("%,d", q.gold()) + " gold#k." + chestText, true, Math.max(0, chestId), inBag);
+        }
+    }
+
+    // --- Accept all quests of one map (user 2026-10-28) (one line)
+    // Related down: accept() for each quest (same check, same db row, same tracker packet as one by one)
+    // Pitfall:      already taken and too easy ones are skipped with the same tests accept() uses; a db error stops.
+    private static String acceptAll(Character chr, List<Quest> list) {
+        Set<Integer> set = taken(chr);
+        if (set == null) {
+            return "#rSorry, I can't find my list right now. Please try again.#k";
+        }
+        List<String> accepted = new ArrayList<>();
+        List<String> easy = new ArrayList<>();
+        String error = null;
+        for (Quest q : list) {
+            if (set.contains(q.mob())) {
+                continue;   // already taken: nothing to do
+            }
+            if (tooEasy(chr, q)) {
+                easy.add(mobName(q.mob()));
+                continue;
+            }
+            String text = accept(chr, q);
+            if (set.contains(q.mob())) {
+                accepted.add(mobName(q.mob()));
+            } else if (text != null) {
+                error = text;
+                break;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (accepted.isEmpty()) {
+            sb.append("Nothing new to take here. Every quest on this map is already taken or too easy for you.");
+        } else {
+            sb.append("Accepted: #b").append(String.join(", ", accepted)).append("#k.");
+        }
+        if (!easy.isEmpty()) {
+            sb.append("\r\nSkipped (too easy): ").append(String.join(", ", easy)).append(".");
+        }
+        if (error != null) {
+            sb.append("\r\n").append(error);
+        }
+        return sb.toString();
+    }
+
+    /** Quests the hero can turn in now (taken + full count), in content order (zone by zone, easy to hard). */
+    private static List<Quest> ready(Character chr, Set<Integer> set) {
+        List<Quest> out = new ArrayList<>();
+        if (set == null) {
+            return out;
+        }
+        for (Quest q : load().quests()) {
+            if (set.contains(q.mob()) && have(chr, q.item()) >= q.count()) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    // --- Turn in every ready quest (user 2026-10-28) (one line)
+    // Related down: turnInPaid() for each quest (same item removal, same prize, same packets as one by one)
+    // Order:        per-hero lock -> ready list -> take the first ones whose chests ALL fit in the Use bag and whose
+    //               gold fits under the purse cap (counted for the whole batch) -> turnInPaid() each -> one summary.
+    // Pitfall:      the lock is the same Set turnInPaid() locks (reentrant), so nothing changes between check and pay.
+    private static String turnInAll(Character chr) {
+        Set<Integer> set = taken(chr);
+        if (set == null) {
+            return "#rSorry, I can't find my list right now. Please try again.#k";
+        }
+        synchronized (set) {
+            List<Quest> ready = ready(chr, set);
+            if (ready.isEmpty()) {
+                return "Nothing is ready yet. Bring me the full count first.";
+            }
+            // how many fit: chests in the Use bag (stacks counted) and gold under the purse cap, for the whole batch
+            List<Pair<Item, InventoryType>> chests = new ArrayList<>();
+            long gold = chr.getMeso();
+            int fit = 0;
+            String why = null;
+            for (Quest q : ready) {
+                if (gold + q.gold() > Integer.MAX_VALUE) {
+                    why = "your gold purse is full";
+                    break;
+                }
+                int chestId = StoryChests.chestFor(mobLevel(q.mob()));
+                if (chestId > 0) {
+                    chests.add(new Pair<>(new Item(chestId, (short) 0, (short) 1), InventoryType.USE));
+                    if (!Inventory.checkSpots(chr, chests)) {
+                        why = "your Use bag has no room for their chests";
+                        break;
+                    }
+                }
+                gold += q.gold();
+                fit++;
+            }
+
+            int done = 0;
+            long exp = 0;
+            long paidGold = 0;
+            int onGround = 0;
+            Map<Integer, Integer> chestCount = new LinkedHashMap<>();
+            String error = null;
+            for (int i = 0; i < fit; i++) {
+                Quest q = ready.get(i);
+                Paid p = turnInPaid(chr, q);
+                if (p == null) {
+                    continue;   // not taken any more: nothing paid
+                }
+                if (!p.paid()) {
+                    error = p.text();
+                    break;
+                }
+                done++;
+                exp += q.exp();
+                paidGold += q.gold();
+                if (p.chestId() > 0) {
+                    chestCount.merge(p.chestId(), 1, Integer::sum);
+                    if (!p.chestInBag()) {
+                        onGround++;
+                    }
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            if (done > 0) {
+                sb.append("#eThank you!#n You turned in #b").append(done).append(done == 1 ? " quest" : " quests")
+                        .append("#k.\r\nYou got #b").append(String.format("%,d", exp)).append(" EXP#k and #b")
+                        .append(String.format("%,d", paidGold)).append(" gold#k.");
+                if (!chestCount.isEmpty()) {
+                    List<String> names = new ArrayList<>();
+                    for (Map.Entry<Integer, Integer> e : chestCount.entrySet()) {
+                        names.add(itemName(e.getKey()) + " x" + e.getValue());
+                    }
+                    sb.append("\r\nChests: #b").append(String.join(", ", names)).append("#k.");
+                    sb.append(onGround > 0 ? "\r\nYour Use bag got full, so " + onGround + " of them are on the ground."
+                            : " Double-click them in your Use bag to open them.");
+                }
+            }
+            int left = ready(chr, set).size();
+            if (error != null) {
+                sb.append(sb.length() > 0 ? "\r\n" : "").append(error);
+            } else if (left > 0 && why != null) {
+                String count = done > 0 ? (left == 1 ? "1 more is" : left + " more are")
+                        : (left == 1 ? "1 quest is" : left + " quests are");
+                sb.append(sb.length() > 0 ? "\r\n" : "").append("#r").append(count).append(" ready, but ").append(why).append(".#k ")
+                        .append(why.startsWith("your gold") ? "Spend some gold and talk to me again."
+                                : "Make room and talk to me again.");
+            }
+            if (sb.length() == 0) {
+                sb.append("Nothing is ready yet. Bring me the full count first.");
+            }
+            log.info("story quests {} ({}): turn in all: {} done, {} EXP, {} gold, {} left", chr.getName(), chr.getId(),
+                    done, exp, paidGold, left);
+            return sb.toString();
         }
     }
 
@@ -445,6 +628,11 @@ public final class StoryQuests {
                 }
                 sb.append("Hi, I'm Wren! I collect monster bits.\r\nBring me 20 and I give you a prize. "
                         + "You can do every quest again and again.\r\nWhere do you hunt?#b\r\n");
+                int readyNow = ready(chr, set).size();
+                if (readyNow > 0) {   // hidden when nothing is ready (the server still checks on the pick)
+                    sb.append("#L").append(TURN_IN_ALL).append("##rTurn in all ready quests (").append(readyNow)
+                            .append(")#b#l\r\n");
+                }
                 for (int z = 0; z < t.zones().size(); z++) {
                     Zone zone = t.zones().get(z);
                     int open = 0;
@@ -477,6 +665,16 @@ public final class StoryQuests {
                     sb.append("#L").append(i).append("#").append(q.count()).append(" ").append(itemName(q.item()))
                             .append(" (").append(mobName(q.mob())).append(", Lv ").append(mobLevel(q.mob())).append(")  ")
                             .append(status(chr, set, q)).append("#l\r\n");
+                }
+                boolean canTake = false;   // the button shows only when at least one quest here can be taken
+                for (Quest q : list) {
+                    if (set != null && !set.contains(q.mob()) && !tooEasy(chr, q)) {
+                        canTake = true;
+                        break;
+                    }
+                }
+                if (canTake) {
+                    sb.append("#L").append(ACCEPT_ALL).append("#Accept all quests on this map#l\r\n");
                 }
                 sb.append("#L").append(BACK).append("#Back#l");
             }

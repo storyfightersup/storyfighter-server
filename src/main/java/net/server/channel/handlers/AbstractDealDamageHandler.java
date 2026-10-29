@@ -130,6 +130,13 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
         public final List<int[]> storyCrits = new ArrayList<>();
         /** StoryFighter: each monster's damage before crits (Blast Arrow's explosion and Frost ticks roll their own). */
         public final Map<Integer, Integer> storyBase = new HashMap<>();
+        /** StoryFighter Chain (any direction, user 2026-10-28): where the throw goes, from the packet's tail (only shown to the
+         *  others, never trusted: StoryAttacks.aimAllows / PvpAttackHandler check every hit on their own). */
+        public boolean chainAim;
+        public int chainAimDx, chainAimDy, chainAimChar;
+        /** Chain thrown by the player with a direction held (user 2026-10-29, tail 'D'): -1 / 0 / 1 each, screen y down.
+         *  Both 0 = the automatic aim. StoryAttacks.chainOffRay checks every target lies on that ray. */
+        public int chainDirX, chainDirY;
 
         public StatEffect getAttackEffect(Character chr, Skill theSkill) {
             Skill mySkill = theSkill;
@@ -233,7 +240,7 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
                 final Monster monster = map.getMonsterByOid(target.getKey());
                 // StoryFighter: Chain / Sniper Shot only reach attackReach px, Sniper Shot only its farthest
                 // target (server.skills.StoryAttacks.aimAllows, logs every check); no hit crosses a Dome's wall
-                if (monster != null && (!server.skills.StoryAttacks.aimAllows(player, attack.skill, monster)
+                if (monster != null && (!server.skills.StoryAttacks.aimAllows(player, attack.skill, monster, attack.direction)
                         || server.skills.StoryDome.blocks(player, monster))) {
                     continue;
                 }
@@ -583,6 +590,8 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
             server.skills.StoryAttacks.afterAttack(player, attack.skill, attack.targets.keySet());
             // StoryFighter: enemy Arrow Sentries / Mirror Twins inside this attack's box take its damage (server.skills.StoryUnits)
             server.skills.StoryUnits.onAttack(player, attack.skill);
+            // StoryFighter: a gold cart inside this attack's box loses life = gold (server.starter.StoryCart, docs/GOLD-CART.md)
+            server.starter.StoryCart.onAttack(player, attack.skill);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -976,6 +985,25 @@ public abstract class AbstractDealDamageHandler extends AbstractPacketHandler {
         if (ret.skill == NightWalker.POISON_BOMB) { // Poison Bomb
             p.skip(4);
             ret.position.setLocation(p.readShort(), p.readShort());
+        }
+        // StoryFighter Chain's aim (OpenStory AttackPacket tail): byte 'C', short dx, short dy, int hero (0 = none)
+        // A throw steered by a held direction (user 2026-10-29): byte 'D', the same fields, then byte dir x, byte dir y
+        if (server.skills.StoryAttacks.isChain(ret.skill) && p.available() >= 9) {
+            byte marker = p.readByte();
+            if (marker == 'C' || marker == 'D') {
+                ret.chainAim = true;
+                ret.chainAimDx = p.readShort();
+                ret.chainAimDy = p.readShort();
+                ret.chainAimChar = p.readInt();
+                if (marker == 'D' && p.available() >= 2) {
+                    ret.chainDirX = Integer.signum(p.readByte());
+                    ret.chainDirY = Integer.signum(p.readByte());
+                }
+            }
+        }
+        // remember this throw's direction (or none) for its checks: aimAllows (monsters, below) and the PvP packet after it
+        if (server.skills.StoryAttacks.isChain(ret.skill)) {
+            server.skills.StoryAttacks.noteChainDir(chr, ret.chainDirX, ret.chainDirY);
         }
         return ret;
     }

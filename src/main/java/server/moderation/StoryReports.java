@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Player reports (docs/MODERATION.md section 1, table storyreports, db extension 024).
- * Packet: REPORT 0x6A in (net.server.channel.handlers.ReportHandler), SUE_CHARACTER_RESULT 0x37 out (byte code).
+ * Packet: REPORT 0x174 in (net.server.channel.handlers.ReportHandler), SUE_CHARACTER_RESULT 0x51C out (byte code).
  * Free. Limits (memory, reset on restart): mod_reports_per_hour per reporter, one report per reporter per target per
  * mod_report_same_gap_s. The reported hero must be on the reporter's map. Proof = StoryChat.proof (server side).
  * GM tools: !reports, !report <id>, !report done <id> (gm3 ReportsCommand / ReportCommand).

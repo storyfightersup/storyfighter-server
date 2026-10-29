@@ -30,6 +30,9 @@ public final class PickupLog {
 
     public static void refused(Character chr, MapObject ob, String reason, String detail) {
         try {
+            if ("far".equals(reason) || "rate".equals(reason)) {
+                Suspects.hit(chr, Suspects.PICKUP);   // !suspects: the other reasons happen in normal play
+            }
             long now = System.currentTimeMillis();
             if (LAST.size() > CLEAN_AT) {
                 LAST.values().removeIf(w -> now - w[0] > 10 * GAP_MS);
@@ -54,6 +57,46 @@ public final class PickupLog {
                     skipped > 0 ? " (+" + skipped + " more)" : "");
         } catch (RuntimeException e) {
             log.warn("pickup log failed", e);   // never break a pickup
+        }
+    }
+
+    // --- Bag full: one clear line for the player, at most one per bag tab every BAG_FULL_GAP_MS (one line)
+    // Related up:   Character.pickupItem (hand AND pet pickups; the log line only for hand pickups)
+    // Why:          lead 2026-10-28: a held Pickup key (about 10 tries a second) or the pet repeated the old red
+    //               "Your inventory is full." line on every try, and it did not say which bag. Loot-owner refusals stay
+    //               silent (normal rule), they never come here.
+    private static final long BAG_FULL_GAP_MS = 5000;
+    // key "characterId:tab" -> last message ms
+    private static final Map<String, long[]> BAG_FULL = new ConcurrentHashMap<>();
+
+    public static void bagFull(Character chr, MapItem item, boolean pet) {
+        try {
+            if (!pet) {
+                refused(chr, item, "bag full", null);
+            }
+            client.inventory.InventoryType type = constants.inventory.ItemConstants.getInventoryType(item.getItemId());
+            String tab = type == null ? "" : switch (type) {
+                case EQUIP -> "Equip";
+                case USE -> "Use";
+                case SETUP -> "Setup";
+                case ETC -> "Etc";
+                case CASH -> "Cash";
+                default -> "";
+            };
+            long now = System.currentTimeMillis();
+            if (BAG_FULL.size() > CLEAN_AT) {
+                BAG_FULL.values().removeIf(w -> now - w[0] > BAG_FULL_GAP_MS);
+            }
+            long[] w = BAG_FULL.computeIfAbsent(chr.getId() + ":" + tab, k -> new long[]{0});
+            synchronized (w) {
+                if (now - w[0] < BAG_FULL_GAP_MS) {
+                    return;
+                }
+                w[0] = now;
+            }
+            chr.dropMessage(5, tab.isEmpty() ? "Your bag is full." : "Your " + tab + " bag is full.");
+        } catch (RuntimeException e) {
+            log.warn("bag full message failed", e);   // never break a pickup
         }
     }
 }

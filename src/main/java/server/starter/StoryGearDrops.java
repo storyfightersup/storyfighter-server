@@ -116,8 +116,9 @@ public final class StoryGearDrops {
         }
         Numbers n = t.n();
         boolean boss = StoryBosses.isStoryBoss(mob.getId());
-        boolean drop = boss ? Randomizer.nextInt(100) < server.skills.StoryHex.dropScale(n.bossDropPercent())
-                : Randomizer.nextInt(1000) < server.skills.StoryHex.dropScale(n.dropPer1000());   // Hex: x hexDrop %
+        // Hex: x hexDrop %; then the live gear rate (GM !rate gear, StoryRates), capped at 100 %
+        boolean drop = boss ? Randomizer.nextInt(100) < StoryRates.gear(server.skills.StoryHex.dropScale(n.bossDropPercent()), 100)
+                : Randomizer.nextInt(1000) < StoryRates.gear(server.skills.StoryHex.dropScale(n.dropPer1000()), 1000);
         if (!drop) {
             return null;
         }

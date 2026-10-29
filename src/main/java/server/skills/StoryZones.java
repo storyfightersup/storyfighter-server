@@ -24,7 +24,7 @@ import tools.PacketCreator;
  * Level 80 (2026-10-27): recallBase = Frost Recall (StoryFrost; kinds 31 combo, 32 recall shards).
  * Packet in (USE_SKILL, after time / skill id / short level): byte phase (0 = Hammer charge starts, 1 = Hammer fires,
  * 2 = a plain cast), byte toleft (1 = facing left). Written by OpenStory StoryZoneUsePacket.
- * Packet out: STORY_SKILL_FX (0x1A0), byte kind (6 and 7 belong to StoryAuras), then the kind's layout (see the packet methods below).
+ * Packet out: STORY_SKILL_FX (0x518), byte kind (6 and 7 belong to StoryAuras), then the kind's layout (see the packet methods below).
  * Related up:   SpecialMoveHandler (use), MapleMap.addPlayer (showTo), AbstractDealDamageHandler / PvpHits (Hex bonus)
  * Related down: OpenStory Net/Handlers/StoryZoneHandler.h -> Gameplay/Combat/StoryZones (draws everything)
  * Pitfall:      these skills run their own cooldown and MP here (SpecialMoveHandler returns before its own), so the
@@ -237,7 +237,7 @@ public final class StoryZones {
         }
     }
 
-    // ================================================================ packets (STORY_SKILL_FX 0x1A0)
+    // ================================================================ packets (STORY_SKILL_FX 0x518)
 
     static OutPacket fx(int kind) {
         OutPacket p = OutPacket.create(SendOpcode.STORY_SKILL_FX);

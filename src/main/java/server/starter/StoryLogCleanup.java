@@ -17,7 +17,8 @@ import java.sql.SQLException;
  *
  * Tables (each with its time column):
  *   storypetpickuplog.at (TIMESTAMP), storyalliancelog.at (BIGINT, ms), characterexplogs.exp_gain_time (DATETIME),
- *   famelog.when (TIMESTAMP), bosslog_daily / bosslog_weekly.attempttime (TIMESTAMP)
+ *   famelog.when (TIMESTAMP), bosslog_daily / bosslog_weekly.attempttime (TIMESTAMP), storysuspects.day (INT, days
+ *   since 1970 UTC)
  * Pitfall: a new *log table must be added here, or it keeps rows forever.
  * Pitfall: storyalliancelog feeds the Alliance window's "top givers"; old deposits drop out of that list (on purpose).
  */
@@ -49,6 +50,8 @@ public final class StoryLogCleanup {
             delete(con, done, "bosslog_weekly", "DELETE FROM bosslog_weekly WHERE attempttime < NOW() - INTERVAL ? DAY", days);
             // player reports hold chat lines (docs/MODERATION.md): kept no longer than the other logs
             delete(con, done, "storyreports", "DELETE FROM storyreports WHERE createdms < ?", cutoffMs);
+            // anti-cheat watch counts (!suspects, docs/ANTICHEAT.md #21): day = days since 1970 (UTC)
+            delete(con, done, "storysuspects", "DELETE FROM storysuspects WHERE day < ?", cutoffMs / DAY_MS);
             // sign-up IPs: only needed for 24 h (StorySignup per-IP limit)
             delete(con, done, "accounts.ip",
                     "UPDATE accounts SET ip = NULL WHERE ip IS NOT NULL AND createdat < NOW() - INTERVAL ? DAY", 1);

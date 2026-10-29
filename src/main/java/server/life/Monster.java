@@ -945,6 +945,8 @@ public class Monster extends AbstractLoadedLife {
             float ringExp = 1.0f + server.starter.StoryGearBonus.expPct(attacker) / 100.0f;
             // StoryFighter Team outpost (StoryOutposts): the holder team's members on this map get + EXP %
             ringExp *= server.starter.StoryOutposts.expFactor(attacker, getMap());
+            // StoryFighter live EXP rate (GM !rate exp, StoryRates): saved rate or a timed event, party share too
+            ringExp *= (float) server.starter.StoryRates.exp();
             if (personalExp != null) {
                 personalExp *= getStatusExpMultiplier(attacker);
                 personalExp *= attacker.getExpRate();

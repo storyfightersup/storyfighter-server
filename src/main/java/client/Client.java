@@ -30,7 +30,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.timeout.IdleStateEvent;
 import net.PacketHandler;
 import net.PacketProcessor;
-import net.netty.InvalidPacketHeaderException;
 import net.packet.InPacket;
 import net.packet.Packet;
 import net.packet.logging.LoggingUtil;
@@ -243,9 +242,8 @@ public class Client extends ChannelInboundHandlerAdapter {
             log.warn("Exception caught by {}", player, cause);
         }
 
-        if (cause instanceof InvalidPacketHeaderException) {
-            SessionCoordinator.getInstance().closeSession(this, true);
-        } else if (cause instanceof IOException) {
+        // bad frames / handshakes close the connection in net.encryption.WireFrameCodec / WireHandshakeHandler
+        if (cause instanceof IOException) {
             closeMapleSession();
         }
     }

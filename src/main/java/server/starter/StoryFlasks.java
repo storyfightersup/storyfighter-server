@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * quantity 1, never used up. Each has a bank (HP or MP points) per hero, at most flask_cap (content/balance.json).
  *
  * Fill: the player drags a potion onto the flask (client UIItemInventory popup Fill 1 / Fill all) -> packet
- * STORY_FLASK_FILL (0x10A): byte mp (0 = HP Flask, 1 = MP Flask), short potion slot (Use tab), short count (0 = all).
+ * STORY_FLASK_FILL (0x188): byte mp (0 = HP Flask, 1 = MP Flask), short potion slot (Use tab), short count (0 = all).
  * Only potions that heal just that kind with a flat amount fit (the amount comes from the item data, built from
  * content/items/20000xx.json). Only the one dropped slot is used. Fill takes at most ceil(room / heal) potions: the
  * last one may top the bank up to exactly the cap and its extra is lost (the same count the client popup shows).
@@ -39,13 +39,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * as a potion for the drink gap (anti-cheat #14 ActionRate.potion), checked only when it really heals.
  *
  * The server is the authority: the banks are in table storyflasks (db extension 012), saved on every change.
- * The client (OpenStory Gameplay/Flasks) mirrors packet STORY_FLASK (0x1A7): int hp bank, int mp bank, int cap.
+ * The client (OpenStory Gameplay/Flasks) mirrors packet STORY_FLASK (0x50E): int hp bank, int mp bank, int cap.
  * Sent at login and on every change.
  * The flasks can't be dropped, sold or traded ({@link #keeps}; Trade Center + trade window via tradeBlock).
  * Players get them from a quest later; for now GM !flasks [name] ({@link #give}) and !flaskbank ({@link #setBank}).
  *
  * Auto fill (user 2026-10-25, go 2026-10-26): one switch per flask, saved per hero (storyflasks.hpauto / mpauto,
- * db extension 018), default off. Client UIFlaskFill "Auto" box -> packet STORY_FLASK_AUTO (0x10B): byte mp, byte on.
+ * db extension 018), default off. Client UIFlaskFill "Auto" box -> packet STORY_FLASK_AUTO (0x187): byte mp, byte on.
  * Switching it on pours every fitting potion in the bag at once ({@link #setAuto}); while on, every fitting potion
  * that enters the bag (ground or pet pickup, shop buy, Trade Center pickup box, quest prize...) goes straight in
  * ({@link #gained}, called from InventoryManipulator.addById / addFromDrop). Auto pours only WHOLE potions that fit
@@ -131,7 +131,7 @@ public final class StoryFlasks {
 
     // ================================================================ fill
 
-    /** Packet STORY_FLASK_FILL (0x10A): byte mp, short potion slot, short count (0 = all). */
+    /** Packet STORY_FLASK_FILL (0x188): byte mp, short potion slot, short count (0 = all). */
     public static final class Handler extends AbstractPacketHandler {
         @Override
         public void handlePacket(InPacket p, Client c) {
@@ -223,7 +223,7 @@ public final class StoryFlasks {
 
     // ================================================================ auto fill
 
-    /** Packet STORY_FLASK_AUTO (0x10B): byte mp (0 = HP Flask, 1 = MP Flask), byte on (0 off, 1 on). */
+    /** Packet STORY_FLASK_AUTO (0x187): byte mp (0 = HP Flask, 1 = MP Flask), byte on (0 off, 1 on). */
     public static final class AutoHandler extends AbstractPacketHandler {
         @Override
         public void handlePacket(InPacket p, Client c) {
@@ -400,16 +400,21 @@ public final class StoryFlasks {
                 }
                 return;
             }
+            if (server.skills.StoryWound.refuses(chr)) {
+                return;   // "Wounded" (user 2026-10-28): potions blocked, the flask too; nothing used
+            }
             if (!server.anticheat.ActionRate.potion(chr, itemId)) {
                 return;   // inside the drink gap: refused quietly, nothing used
             }
             int give = (int) Math.min(missing, bank);
+            // "Wounded": a cut heal still empties the bank by what was poured (like a cut potion is still drunk)
+            int healed = server.skills.StoryWound.heal(chr, give);
             if (mp) {
                 b.mp -= give;
-                chr.addMP(give);
+                chr.addMP(healed);
             } else {
                 b.hp -= give;
-                chr.addHP(give);
+                chr.addHP(healed);
             }
             save(b);
             send(b);
@@ -525,7 +530,7 @@ public final class StoryFlasks {
     }
 
     /**
-     * STORY_FLASK (0x1A7): int hp bank, int mp bank, int cap, byte auto (bit 0 HP Flask, bit 1 MP Flask).
+     * STORY_FLASK (0x50E): int hp bank, int mp bank, int cap, byte auto (bit 0 HP Flask, bit 1 MP Flask).
      * OpenStory StoryFlaskHandler -> Flasks::set_state / set_auto (an old client stops reading after the cap).
      */
     private static void send(Bank b) {

@@ -40,7 +40,7 @@ public class FamilySeparateHandler extends AbstractPacketHandler {
         }
         FamilyEntry forkOn = null;
         boolean isSenior;
-        if (p.available() > 0) { //packet 0x95 doesn't send id, since there is only one senior
+        if (p.available() > 0) { //SEPARATE_FAMILY_BY_JUNIOR does not send an id, since there is only one senior
             forkOn = c.getPlayer().getFamily().getEntryByID(p.readInt());
             if (!c.getPlayer().getFamilyEntry().isJunior(forkOn)) {
                 return; //packet editing?

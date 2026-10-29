@@ -57,6 +57,7 @@ import client.command.commands.gm2.OpenBossCommand;
 import client.command.commands.gm2.OutpostCommand;
 import client.command.commands.gm2.BountyCommand;
 import client.command.commands.gm2.CityCommand;
+import client.command.commands.gm2.CartCommand;
 import client.command.commands.gm2.CityGoldCommand;
 import client.command.commands.gm2.CitySiegeCommand;
 import client.command.commands.gm2.CitizenCommand;
@@ -93,6 +94,7 @@ import client.command.commands.gm2.WhereaMiCommand;
 import client.command.commands.gm3.BanCommand;
 import client.command.commands.gm3.MuteCommand;
 import client.command.commands.gm3.ReportCommand;
+import client.command.commands.gm3.SuspectsCommand;
 import client.command.commands.gm3.ReportsCommand;
 import client.command.commands.gm3.TempbanCommand;
 import client.command.commands.gm3.UnmuteCommand;
@@ -144,18 +146,14 @@ import client.command.commands.gm3.TimerAllCommand;
 import client.command.commands.gm3.TimerCommand;
 import client.command.commands.gm3.TimerMapCommand;
 import client.command.commands.gm3.UnBanCommand;
-import client.command.commands.gm4.BossDropRateCommand;
-import client.command.commands.gm4.DropRateCommand;
-import client.command.commands.gm4.ExpRateCommand;
 import client.command.commands.gm4.ForceVacCommand;
 import client.command.commands.gm4.ItemVacCommand;
-import client.command.commands.gm4.MesoRateCommand;
 import client.command.commands.gm4.PmobCommand;
 import client.command.commands.gm4.PmobRemoveCommand;
 import client.command.commands.gm4.PnpcCommand;
 import client.command.commands.gm4.PnpcRemoveCommand;
 import client.command.commands.gm4.ProItemCommand;
-import client.command.commands.gm4.QuestRateCommand;
+import client.command.commands.gm4.RateCommand;
 import client.command.commands.gm4.ServerMessageCommand;
 import client.command.commands.gm4.SetEqStatCommand;
 import client.command.commands.gm5.DebugCommand;
@@ -381,6 +379,7 @@ public class CommandsExecutor {
         addCommand("openboss", 2, OpenBossCommand.class);   // StoryFighter test tool: the open world boss (StoryOpenBoss)
         addCommand("outpost", 2, OutpostCommand.class);   // StoryFighter test tool: this map's Team outpost (StoryOutposts)
         addCommand("bounty", 2, BountyCommand.class);   // StoryFighter test tool: bounties (StoryBounty, docs/BOUNTY.md)
+        addCommand("cart", 2, CartCommand.class);   // StoryFighter test tool: gold carts (StoryCart, docs/GOLD-CART.md)
         addCommand("city", 2, CityCommand.class);   // StoryFighter test tool: city monuments (StoryCities, docs/CITIES.md)
         addCommand("citygold", 2, CityGoldCommand.class);   // StoryFighter test tool: add gold to your alliance bank
         addCommand("citysiege", 2, CitySiegeCommand.class);   // StoryFighter test tool: your alliance's Siege level
@@ -453,6 +452,7 @@ public class CommandsExecutor {
         addCommand("unban", 3, UnBanCommand.class);
         addCommand("reports", 3, ReportsCommand.class);   // StoryFighter player reports (docs/MODERATION.md)
         addCommand("report", 3, ReportCommand.class);
+        addCommand("suspects", 3, SuspectsCommand.class);   // StoryFighter anti-cheat watch hits (docs/ANTICHEAT.md #21)
         addCommand("mute", 3, MuteCommand.class);
         addCommand("unmute", 3, UnmuteCommand.class);
         addCommand("tempban", 3, TempbanCommand.class);
@@ -482,11 +482,8 @@ public class CommandsExecutor {
         addCommand("servermessage", 4, ServerMessageCommand.class);
         addCommand("proitem", 4, ProItemCommand.class);
         addCommand("seteqstat", 4, SetEqStatCommand.class);
-        addCommand("exprate", 4, ExpRateCommand.class);
-        addCommand("mesorate", 4, MesoRateCommand.class);
-        addCommand("droprate", 4, DropRateCommand.class);
-        addCommand("bossdroprate", 4, BossDropRateCommand.class);
-        addCommand("questrate", 4, QuestRateCommand.class);
+        // StoryFighter live rates (server.starter.StoryRates); replaces !exprate / !mesorate / !droprate / !bossdroprate / !questrate
+        addCommand("rate", 4, RateCommand.class);
         addCommand("itemvac", 4, ItemVacCommand.class);
         addCommand("forcevac", 4, ForceVacCommand.class);
         addCommand("pnpc", 4, PnpcCommand.class);

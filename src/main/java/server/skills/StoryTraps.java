@@ -303,10 +303,12 @@ public final class StoryTraps {
         int percent = StorySkills.value(trap.skillId, trap.level, "trapDamage");
         int dealt = StoryZones.hitPlayer(caster, victim, percent, false);
         log.info("story trap {}: {} took {} from {}'s trap", trap.id, victim.getName(), dealt, caster.getName());
-        StoryZones.stunPlayer(victim, StorySkills.value(trap.skillId, trap.level, "stunTime"));
+        int stunMs = StorySkills.value(trap.skillId, trap.level, "stunTime");
+        StoryZones.stunPlayer(victim, stunMs);
+        StoryWound.block(caster, victim, trap.skillId, stunMs, "snap trap");   // no potions while snapped (user 2026-10-28)
     }
 
-    // --- Quake Hammer's shock: each enemy trap within range breaks at chancePct % (one line)
+    // --- Quake Hammer's shock (and Dome Breaker's Hammer Sweep): each enemy trap within range breaks at chancePct % (one line)
     // Related up:   StoryHammer (the slam). Enemy = another hero's trap, not the party's, on a PvP stage.
     public static int crushNear(Character attacker, Point at, int range, int chancePct) {
         MapleMap map = attacker.getMap();
@@ -322,10 +324,10 @@ public final class StoryTraps {
                 continue;
             }
             if (tools.Randomizer.nextInt(100) < chancePct) {
-                remove(map, trap, true, "broken by " + attacker.getName() + "'s Quake Hammer");
+                remove(map, trap, true, "broken by " + attacker.getName() + "'s hammer");
                 broken++;
             } else {
-                log.info("story trap {}: held against {}'s Quake Hammer", trap.id, attacker.getName());
+                log.info("story trap {}: held against {}'s hammer", trap.id, attacker.getName());
             }
         }
         return broken;

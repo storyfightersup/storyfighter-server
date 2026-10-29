@@ -30,3 +30,7 @@ database/docker-pg-db-data
 
 # local server logs
 *.log
+
+# StoryFighter wire v1 server key (docs/PROTOCOL.md section 4): lives in %USERPROFILE%\.storyfighter or /etc/storyfighter, never here
+*.pem
+wire-key*

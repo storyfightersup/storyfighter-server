@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *  - Statuses on enemies: Frost Field's chill (damage over time + slow; a snow puff on every tick) and stuns (Twin
  *    Slash, Snap Trap, any Monster.stunFor / Character.giveDebuff STUN), on monsters and on heroes.
  * A hero arriving on the map gets everything still on (showTo). The client also ends each look by its own clock.
- * Packets (STORY_SKILL_FX 0x1A0, see StoryZones):
+ * Packets (STORY_SKILL_FX 0x518, see StoryZones):
  *   FX_STATUS 6: byte who (0 monster, 1 hero), int id (object id / character id), byte status (1 chill, 2 stun),
  *                int ms left (0 = over), byte puff (1 = a frost tick landed now: play the snow puff)
  *   FX_AURA   7: int character id, int skill id, int ms left (0 = over)
@@ -38,6 +38,7 @@ public final class StoryAuras {
     public static final int STUN = 2;
     public static final int FREEZE = 3;
     public static final int LANCE = 4;   // Lingering Lance (lv 70, 2026-10-25): an ice spear stuck in the body
+    public static final int WOUND = 5;   // "Wounded" (2026-10-28, StoryWound): a cracked potion beside the head, heroes only
 
     private record Entry(int who, int id, int status, long endsAt) {
     }

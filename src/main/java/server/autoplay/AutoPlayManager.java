@@ -172,6 +172,9 @@ public final class AutoPlayManager {
             boolean restores = hp ? (effect.getHp() > 0 || effect.getHpRate() > 0)
                     : (effect.getMp() > 0 || effect.getMpRate() > 0);
             if (restores) {
+                if (server.starter.Slice.ON && item.getItemId() / 10000 == 200 && server.skills.StoryWound.refuses(chr)) {
+                    return;   // "Wounded": potions blocked, nothing used (StoryWound)
+                }
                 if (!effect.applyTo(chr)) {
                     return;
                 }

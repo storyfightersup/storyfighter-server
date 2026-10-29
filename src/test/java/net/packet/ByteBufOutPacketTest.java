@@ -35,14 +35,14 @@ class ByteBufOutPacketTest {
 
     @Test
     void getBytes() {
-        ByteBufOutPacket outPacket = new ByteBufOutPacket(SendOpcode.PING); // This opcode has value 0x11 = 17 in decimal
+        ByteBufOutPacket outPacket = new ByteBufOutPacket(SendOpcode.PING); // PING = 0x04AC (docs/protocol/opcodes.json), written little-endian
         outPacket.writeByte(10);
         outPacket.writeByte(20);
         outPacket.writeByte(30);
 
         byte[] bytes = outPacket.getBytes();
 
-        assertArrayEquals(new byte[]{(byte) 17, (byte) 0, (byte) 10, (byte) 20, (byte) 30}, bytes);
+        assertArrayEquals(new byte[]{(byte) 0xAC, (byte) 0x04, (byte) 10, (byte) 20, (byte) 30}, bytes);
     }
 
     @Test

@@ -14,7 +14,7 @@ import tools.PacketCreator;
  *        (partyExpShare minus partyExpGapStep per level of gap to the killer, at least 0; content/balance.json),
  *        or their own damage share if that is more.
  * Chat:  MultiChatHandler (type 1 party, type 4 world), GeneralChatHandler (/pt, /p, /party, /world typed lines).
- * Related down: PacketCreator.storyParty (STORY_PARTY 0x19E), PacketCreator.storyBubble (STORY_BUBBLE 0x19D)
+ * Related down: PacketCreator.storyParty (STORY_PARTY 0x513), PacketCreator.storyBubble (STORY_BUBBLE 0x508)
  * Pitfall: the v83 party data block on the wire still has 6 member slots; only the cap is ours.
  */
 public final class StoryParty {

@@ -29,9 +29,9 @@ import java.util.regex.Pattern;
  * StoryFighter sign-up window (user go 2026-10-27, contract docs/SIGNUP.md). The ONLY way to make an account:
  * config AUTOMATIC_REGISTER is false, so an unknown name at login gets the normal "not registered" answer.
  *
- * recv STORY_SIGNUP 0x10E (login server, before login):
+ * recv STORY_SIGNUP 0x18B (login server, before login):
  *   string name, string password, string email ("" = none), byte acceptedTerms (1), byte age13 (1)
- * send STORY_SIGNUP_RESULT 0x1AD: byte code, string text (shown by the client as is)
+ * send STORY_SIGNUP_RESULT 0x517: byte code, string text (shown by the client as is)
  *   0 ok, 1 name taken, 2 name not allowed, 3 password length, 4 too many new accounts from this network today,
  *   5 terms not accepted, 6 email not valid, 7 too fast, 8 server error
  *
@@ -120,7 +120,7 @@ public final class StorySignup {
                 return refuse(code, PASS_LENGTH, name, ip, "password length",
                         "Password: " + passMin + "-" + passMax + " characters.");
             }
-            if (!email.isEmpty() && (email.length() > EMAIL_MAX || !EMAIL.matcher(email).matches())) {
+            if (!email.isEmpty() && !emailShapeOk(email)) {
                 return refuse(code, EMAIL_BAD, name, ip, "email shape", "This email does not look right. Leave it empty or fix it.");
             }
             int perIp = StoryBalance.number("signupPerIpDay");
@@ -155,6 +155,12 @@ public final class StorySignup {
             code[0] = ERROR;
             return "Server error. Please try again later.";
         }
+    }
+
+    // --- Simple email shape check x@y.z, at most the column size (one line)
+    // Related up:   signup, StoryRecovery (forgot account, docs/FORGOT-ACCOUNT.md)
+    static boolean emailShapeOk(String email) {
+        return email != null && !email.isEmpty() && email.length() <= EMAIL_MAX && EMAIL.matcher(email).matches();
     }
 
     private static boolean blocked(String name) {
@@ -197,7 +203,7 @@ public final class StorySignup {
     }
 
     // the name comes from the client: keep the log line one short line
-    private static String clean(String name) {
+    static String clean(String name) {
         String s = name == null ? "" : name.replaceAll("[^A-Za-z0-9_.-]", "?");
         return s.length() > 20 ? s.substring(0, 20) + "..." : s;
     }

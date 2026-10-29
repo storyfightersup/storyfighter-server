@@ -35,7 +35,6 @@ import config.YamlConfig;
 import constants.game.GameConstants;
 import constants.inventory.ItemConstants;
 import constants.net.OpcodeConstants;
-import constants.net.ServerConstants;
 import database.DatabaseMigrations;
 import database.note.NoteDao;
 import net.ChannelDependencies;
@@ -440,6 +439,15 @@ public class Server {
         int questrate = YamlConfig.config.worlds.get(i).quest_rate;
         int travelrate = YamlConfig.config.worlds.get(i).travel_rate;
         int fishingrate = YamlConfig.config.worlds.get(i).fishing_rate;
+        // StoryFighter: our live rates are server.starter.StoryRates (GM !rate). The old world rates would stack with
+        // them (Character.setWorldRates), so they stay x1 whatever config.yaml says.
+        if (server.starter.Slice.ON && (exprate != 1 || mesorate != 1 || droprate != 1 || bossdroprate != 1)) {
+            log.warn("World {}: config.yaml exp/meso/drop/boss_drop rates ignored (set to 1); use !rate", i);
+            exprate = 1;
+            mesorate = 1;
+            droprate = 1;
+            bossdroprate = 1;
+        }
 
         int flag = YamlConfig.config.worlds.get(i).flag;
         String event_message = YamlConfig.config.worlds.get(i).event_message;
@@ -866,7 +874,8 @@ public class Server {
 
     public void init() {
         Instant beforeInit = Instant.now();
-        log.info("Cosmic v{} starting up.", ServerConstants.VERSION);
+        log.info("StoryFighter server (wire v{}) starting up.", net.encryption.WireCrypto.WIRE_VERSION);
+        net.encryption.WireKey.loadOrExit();   // identity key for the handshake; no key = no start (docs/PROTOCOL.md)
 
         if (YamlConfig.config.server.SHUTDOWNHOOK) {
             Runtime.getRuntime().addShutdownHook(new Thread(shutdown(false)));
@@ -968,12 +977,15 @@ public class Server {
         server.starter.StoryBounty.start();   // bounties + Wanted Board (docs/BOUNTY.md), after the worlds exist
         server.starter.StoryCities.start();   // city monuments + alliance bank (docs/CITIES.md, channel 1), after the worlds exist
         server.starter.StoryCitizens.start();   // citizens of alliances (docs/CITIZENS.md), after StoryCities
+        server.starter.StoryCart.start();   // gold carts (docs/GOLD-CART.md): fees of carts a crash left behind go back, then the cart clock
         // StoryFighter Trade Center: ends auctions on time, also the ones that ended while the server was off
         server.starter.TradeCenter.start();
         // StoryFighter pet pickup time: counts down running pickups, ends empty ones (server.starter.PetPickup)
         server.starter.PetPickup.start();
         // StoryFighter privacy: DB log rows older than 90 days go once a day, sign-up IPs after 1 day (docs/SIGNUP.md)
         server.starter.StoryLogCleanup.start();
+        server.anticheat.Suspects.start();   // anti-cheat watch counts for !suspects (docs/ANTICHEAT.md #21)
+        server.starter.StoryRates.start();   // live EXP / gold / drop / gear rates, GM !rate (db ext 028)
 
         OpcodeConstants.generateOpcodeNames();
         CommandsExecutor.getInstance();
@@ -1929,6 +1941,7 @@ public class Server {
         if (getWorlds() == null) {
             return;//already shutdown
         }
+        server.starter.StoryCart.shutdown();   // StoryFighter: running gold carts are lost, their fees go to the pickup box (docs/GOLD-CART.md)
         for (World w : getWorlds()) {
             w.shutdown();
         }

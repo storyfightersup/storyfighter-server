@@ -104,6 +104,12 @@ public final class CloseRangeDamageHandler extends AbstractDealDamageHandler {
             c.sendPacket(PacketCreator.getEnergy("energy", chr.getDojoEnergy()));
         }
 
+        // StoryFighter Chain (any direction, user 2026-10-28): the others learn where the throw goes BEFORE its attack
+        // packet, so their screens draw the chain along the same line (OpenStory STORY_SKILL_FX kind 33 -> set_chain_aim)
+        if (attack.chainAim && attack.skilllevel > 0) {
+            chr.getMap().broadcastMessage(chr, server.skills.StoryAttacks.chainAimPacket(chr, attack.skill,
+                    attack.chainAimDx, attack.chainAimDy, attack.chainAimChar), false, true);
+        }
         chr.getMap().broadcastMessage(chr, PacketCreator.closeRangeAttack(chr, attack.skill, attack.skilllevel,
                 attack.stance, attack.numAttackedAndDamage, attack.targets, attack.speed, attack.direction,
                 attack.display), false, true);

@@ -97,6 +97,15 @@ public final class SpecialMoveHandler extends AbstractPacketHandler {
             return;
         }
 
+        // StoryFighter Iron Leash (user 2026-10-29): Chain is an attack (its throw comes as an attack packet), so a
+        // USE_SKILL with Chain's id is only ever the "reel in" press while its chain holds an enemy. Before the cooldown
+        // check: no MP, no damage, Chain's cooldown untouched. StoryLeash.reel checks the leash is this hero's own.
+        if (server.skills.StoryAttacks.isChain(skillid)) {
+            server.skills.StoryLeash.reel(chr, skillid);
+            c.sendPacket(PacketCreator.enableActions());
+            return;
+        }
+
         // Charge, Rope Arrow and our movement skills: the client moves the body (ours are checked by MovementSkills).
         // Their reused ids must not run the old knight-job effect.
         if (server.skills.MovementSkills.isOurs(skillid)) {
@@ -108,6 +117,13 @@ public final class SpecialMoveHandler extends AbstractPacketHandler {
             return;
         }
 
+        // StoryFighter Dome pressed again while the caster's OWN Dome stands: it comes down at once (user 2026-10-28).
+        // Before the cooldown check: no MP, the cooldown is not restarted (it keeps counting from the cast).
+        // StoryDome.endOwn checks that the Dome is really this hero's own and still up; otherwise the press is a cast.
+        if (server.skills.StorySkills.isZone(skillid) && server.skills.StoryDome.endOwn(chr, skillid)) {
+            c.sendPacket(PacketCreator.enableActions());
+            return;
+        }
         StatEffect effect = skill.getEffect(skillLevel);
         if (CustomSkills.paced(skillid)) {
             if (CustomSkills.blockPacedCast(chr, skillid)) {
@@ -215,6 +231,7 @@ public final class SpecialMoveHandler extends AbstractPacketHandler {
             monster.aggroClearDamages();
             monster.aggroMonsterDamage(chr, 1);
             monster.aggroSwitchController(chr, true);
+            server.anticheat.MobMoveCheck.pull(monster, chr.getPosition(), "magnet by " + chr.getName());   // anti-cheat #23
             taken++;
         }
         byte direction = p.available() >= 1 ? p.readByte() : 0;

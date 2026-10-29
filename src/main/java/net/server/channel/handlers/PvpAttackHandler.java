@@ -37,7 +37,7 @@ public final class PvpAttackHandler extends AbstractPacketHandler {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PvpAttackHandler.class);
 
     // --- Apply player hits from a stage swing (one line)
-    // Related up:   OpenStory Combat::hit_players, opcode PVP_ATTACK 0x105
+    // Related up:   OpenStory Combat::hit_players, opcode PVP_ATTACK 0x16D
     // Related down: Character.defeatInPvp, PacketCreator.damagePlayer
     // Shared state: the stage map, both players' parties, target HP
     // Order:        reject first (wrong map, party, range), then guards, then HP. A killing hit leaves them on the grave.
@@ -129,12 +129,26 @@ public final class PvpAttackHandler extends AbstractPacketHandler {
                 why.append(' ').append(target.getName()).append("=too far (800 px)");
                 continue;
             }
-            if (!server.skills.StorySkills.inReach(chr, skillId, target.getPosition())) {
+            // Chain reaches any direction (user 2026-10-28): the body within reach of the caster's centre, no Dome wall
+            // on the line (anti-cheat #22 note); every other skill keeps the facing box below
+            if (server.skills.StoryAttacks.isChain(skillId)) {
+                String refused = server.skills.StoryAttacks.chainRefusal(chr, skillId, target.getPosition(),
+                        server.skills.StoryAttacks.HERO_BODY, server.skills.StorySkills.hitboxLagPvpPx());
+                if (refused != null) {
+                    why.append(' ').append(target.getName()).append("=chain ").append(refused);
+                    continue;
+                }
+            } else if (!server.skills.StorySkills.inReach(chr, skillId, target.getPosition())) {
                 why.append(' ').append(target.getName()).append("=out of reach");
                 continue;
             }
-            if (!server.skills.StorySkills.inBox(chr, skillId, target.getPosition())) {
-                why.append(' ').append(target.getName()).append("=out of box");
+            // the client tests the other hero's feet point against the box (no body), both sides; room hitbox_lag_pvp_px
+            if (!server.skills.StoryAttacks.isChain(skillId) && !server.skills.StorySkills.inBox(chr, skillId, target.getPosition())) {
+                why.append(' ').append(target.getName()).append("=out of box (dx ")
+                        .append(target.getPosition().x - chr.getPosition().x).append(" dy ")
+                        .append(target.getPosition().y - chr.getPosition().y).append(", gap ")
+                        .append(server.skills.StorySkills.boxGap(chr, skillId, target.getPosition(), null, 0))
+                        .append(" px, room ").append(server.skills.StorySkills.hitboxLagPvpPx()).append(')');
                 continue;
             }
             if (taken >= maxTargets) {

@@ -64,6 +64,11 @@ public final class UseItemHandler extends AbstractPacketHandler {
                 c.sendPacket(PacketCreator.enableActions());
                 return;
             }
+            // "Wounded" (user 2026-10-28, StoryWound): while potions are blocked the potion is refused, not used up
+            if (server.starter.Slice.ON && itemId / 10000 == 200 && server.skills.StoryWound.refuses(chr)) {
+                c.sendPacket(PacketCreator.enableActions());
+                return;
+            }
             // Anti-cheat #14 (user 2026-10-24): at most 1 potion per potion_min_gap_ms (content/balance.json),
             // PvE and PvP. Too fast = refused quietly: the potion is not used.
             if (server.starter.Slice.ON && itemId / 10000 == 200

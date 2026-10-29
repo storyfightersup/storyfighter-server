@@ -112,6 +112,7 @@ public final class MacroWatch {
             return;
         }
         s.lastLogMs = now;
+        Suspects.hit(chr, Suspects.MACRO);   // !suspects (one per rhythm line)
         int pickups = 0;
         for (int i = 0; i < events; i++) {
             pickups += s.count[(s.head + i) % CAP];

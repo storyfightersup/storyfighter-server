@@ -209,7 +209,7 @@ public final class PacketProcessor {
     }
 
     public PacketHandler getHandler(short packetId) {
-        if (packetId > handlers.length) {
+        if (packetId < 0 || packetId >= handlers.length) {
             return null;
         }
         PacketHandler handler = handlers[packetId];
@@ -275,6 +275,7 @@ public final class PacketProcessor {
         registerHandler(RecvOpcode.VIEW_ALL_WITH_PIC, new ViewAllCharSelectedWithPicHandler());
         registerHandler(RecvOpcode.VIEW_ALL_PIC_REGISTER, new ViewAllCharRegisterPicHandler());
         registerHandler(RecvOpcode.STORY_SIGNUP, new server.starter.StorySignup.Handler());   // sign-up window (docs/SIGNUP.md)
+        registerHandler(RecvOpcode.STORY_RECOVERY, new server.starter.StoryRecovery.Handler());   // forgot account (docs/FORGOT-ACCOUNT.md)
     }
 
     private void registerChannelHandlers() {

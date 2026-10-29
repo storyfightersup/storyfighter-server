@@ -19,9 +19,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *     player (keepSpot, StoryAttacks.moveVictim). A body clearly past the rope is set back at its end.
  *   - less damage taken: anchorCut %, added to Iron Guard's cut, together at most guardCap % (DamageGuards.apply)
  *   - a shield of anchorShield % of max HP soaks up hits until it is used up (absorb, DamageGuards.apply)
+ *   - no stun, freeze or slow while planted; those already on come off at the plant (immune, shakeOff; user 2026-10-29)
  * The buff starts and ends everything: Character.registerEffect -> start, Character.cancelEffect -> end (time out,
  * the key pressed again = CANCEL_BUFF, weapon switch, death). A map change ends the buff (onEnterMap).
- * Packets (STORY_SKILL_FX 0x1A0): kind 12 anchor (on / off), kind 13 shield (left / broken) - see the methods below.
+ * Packets (STORY_SKILL_FX 0x518): kind 12 anchor (on / off), kind 13 shield (left / broken) - see the methods below.
  * Related up:   Character.registerEffect / cancelEffect, DamageGuards.apply, MovePlayerHandler, MovementSkills.check,
  *               StoryAttacks.moveVictim, MapleMap.addPlayer (StoryZones.showTo -> showTo, onEnterMap)
  * Related down: OpenStory Gameplay/Combat/StoryAllies (sword, rope, bubble, the tether on the hero's own body)
@@ -102,8 +103,33 @@ public final class StoryAnchor {
         Anchor a = new Anchor(skillId, map, new Point(at), reach, cut, cap <= 0 ? 70 : cap, shield, System.currentTimeMillis() + left);
         ANCHORS.put(chr.getId(), a);
         map.broadcastMessage(anchorPacket(chr.getId(), a, left));
+        shakeOff(chr);   // planted: a stun, freeze or slow already on comes off at once (user 2026-10-29)
         log.info("story anchor {} skill {} lv {}: sword at {},{}, rope {} px, cut {}% (cap {}%), shield {}, {} ms", chr.getName(), skillId,
                 level, at.x, at.y, reach, cut, a.cap, shield, left);
+    }
+
+    // ================================================================ control immunity (user 2026-10-29)
+    // While the sword is planted the hero cannot be stunned (Twin Slash, Snap Trap, monster stun skills), frozen (Ice Lance,
+    // Twin Lance: a stun + the ice block) or slowed (Frost Field and Mirror Twins' frost: MOVE_SLOW; monster slow skills:
+    // Disease.SLOW). Damage, Frost ticks, pushes and pulls still land (the rope holds a push / pull, keepSpot).
+    // Related up:   Character.giveDebuff (STUN, SLOW), ElementEffects.sendMoveSlow (every walk slow on a hero),
+    //               StoryAttacks.freeze (no ice block on an anchored hero)
+
+    // --- Is this hero planted with Anchor Blade right now (no stun, freeze or slow)? (one line)
+    public static boolean immune(Character chr) {
+        return of(chr) != null;
+    }
+
+    // --- At the plant: what is already on comes off (one line)
+    private static void shakeOff(Character chr) {
+        boolean had = chr.hasDisease(client.Disease.STUN) || chr.hasDisease(client.Disease.SLOW);
+        chr.dispelDebuff(client.Disease.STUN);   // the stars go away for everyone (Character.dispelDebuff)
+        chr.dispelDebuff(client.Disease.SLOW);
+        StoryAuras.heroStatus(chr, StoryAuras.FREEZE, 0, false);   // the ice block, if Ice Lance had frozen them
+        chr.sendPacket(PacketCreator.cancelBuff(java.util.List.of(client.BuffStat.MOVE_SLOW)));   // a frost slow on the walk
+        if (had) {
+            log.info("story anchor {}: planted, stun / slow removed", chr.getName());
+        }
     }
 
     // --- The buff ended: the sword comes out (one line)
@@ -294,7 +320,7 @@ public final class StoryAnchor {
         return p;
     }
 
-    // ================================================================ packets (STORY_SKILL_FX 0x1A0)
+    // ================================================================ packets (STORY_SKILL_FX 0x518)
 
     // kind 12: int character id, int skill, short x, short y (the sword's ground spot), short reach, int ms left
     //          (0 = the sword is out), int shield, int shield max

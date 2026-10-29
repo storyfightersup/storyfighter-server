@@ -36,6 +36,15 @@ public class RatesCommand extends Command {
     @Override
     public void execute(Client c, String[] params) {
         Character player = c.getPlayer();
+        if (server.starter.Slice.ON) {
+            // StoryFighter: the live rates (server.starter.StoryRates, GM !rate); the old world rates stay x1
+            StringBuilder sb = new StringBuilder("#eRATES#n\r\n\r\n");
+            for (String line : server.starter.StoryRates.lines()) {
+                sb.append(line).append("\r\n");
+            }
+            player.showHint(sb.toString(), 300);
+            return;
+        }
 
         // travel rates not applicable since it's intrinsically a server/environment rate rather than a character rate
         String showMsg_ = "#eCHARACTER RATES#n" + "\r\n\r\n";

@@ -194,7 +194,7 @@ public final class StoryTeam {
         chr.dropMessage(5, "You invited " + target.getName() + " to alliance " + team.getName() + ".");
     }
 
-    /** Decline (DENY_GUILD_REQUEST 0x7F): answers the hero's own open team invite, wherever the inviter is. */
+    /** Decline (DENY_GUILD_REQUEST 0x12B): answers the hero's own open team invite, wherever the inviter is. */
     public static void decline(Character chr) {
         Object ref = InviteCoordinator.pendingReference(InviteType.GUILD, chr.getId());
         if (ref instanceof Integer gid) {

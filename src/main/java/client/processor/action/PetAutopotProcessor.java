@@ -156,6 +156,10 @@ public class PetAutopotProcessor {
                     // Refused quietly: nothing is used. The compulsory mode would otherwise drink many at once.
                     if (server.starter.Slice.ON && itemId / 10000 == 200 && qtyCount > 0) {
                         qtyCount = 1;
+                        if (server.skills.StoryWound.refuses(chr)) {   // "Wounded": blocked, nothing used (StoryWound)
+                            c.sendPacket(PacketCreator.enableActions());
+                            return;
+                        }
                         if (!server.anticheat.ActionRate.potion(chr, itemId)) {
                             c.sendPacket(PacketCreator.enableActions());
                             return;

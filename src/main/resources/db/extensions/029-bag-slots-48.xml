@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- StoryFighter (user 2026-10-28): bags twice as big. Runs once: every hero's Equip / Use / Setup / Etc tab
+         gets 2x its slots (24 -> 48), at most 96 (the client's limit). New heroes get 48 (Character.getDefault).
+         Pitfall: never edit db/tables/*.sql, because Liquibase checks their checksums and the server stops starting. -->
+    <changeSet id="ext-029-bag-slots-48" author="storyfighter">
+        <sql>
+            UPDATE characters SET equipslots = LEAST(equipslots * 2, 96), useslots = LEAST(useslots * 2, 96),
+                                  setupslots = LEAST(setupslots * 2, 96), etcslots = LEAST(etcslots * 2, 96);
+            ALTER TABLE characters ALTER equipslots SET DEFAULT 48, ALTER useslots SET DEFAULT 48,
+                                   ALTER setupslots SET DEFAULT 48, ALTER etcslots SET DEFAULT 48;
+        </sql>
+    </changeSet>
+</databaseChangeLog>

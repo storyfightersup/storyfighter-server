@@ -58,7 +58,6 @@ import constants.skills.Buccaneer;
 import constants.skills.ChiefBandit;
 import constants.skills.Corsair;
 import constants.skills.ThunderBreaker;
-import net.encryption.InitializationVector;
 import net.opcodes.SendOpcode;
 import net.packet.ByteBufOutPacket;
 import net.packet.InPacket;
@@ -545,26 +544,6 @@ public class PacketCreator {
         p.writeLong(getTime(System.currentTimeMillis()));
         p.writeInt(0);
         p.writeString("http://maplesolaxia.com");
-        return p;
-    }
-
-    /**
-     * Sends a hello packet.
-     *
-     * @param mapleVersion The maple client version.
-     * @param sendIv       the IV in use by the server for sending
-     * @param recvIv       the IV in use by the server for receiving
-     * @return
-     */
-    public static Packet getHello(short mapleVersion, InitializationVector sendIv, InitializationVector recvIv) {
-        OutPacket p = new ByteBufOutPacket();
-        p.writeShort(0x0E);
-        p.writeShort(mapleVersion);
-        p.writeShort(1);
-        p.writeByte(49);
-        p.writeBytes(recvIv.getBytes());
-        p.writeBytes(sendIv.getBytes());
-        p.writeByte(8);
         return p;
     }
 
@@ -2557,6 +2536,25 @@ public class PacketCreator {
             p.writeInt(damage);
         }
 
+        return p;
+    }
+
+    // --- A hero hit a hero (PvP): the v83 DAMAGE_PLAYER layout + a tail naming the attacker (user 2026-10-28) (one line)
+    // Related up:   PvpHits.apply (the hit and the shield word; not the bounce)
+    // Related down: OpenStory DamagePlayerHandler: after the direction it reads short 0, int damage, byte 'H', int attacker
+    //               (exactly 11 bytes; a monster hit never has 11) -> Player::note_attacker (auto-play fights back only
+    //               against this hero; Chain aims at them first). Old clients stop reading before the tail.
+    public static Packet damagePlayerByHero(int skill, int attackerId, int cid, int damage, int direction) {
+        final OutPacket p = OutPacket.create(SendOpcode.DAMAGE_PLAYER);
+        p.writeInt(cid);
+        p.writeByte(skill);
+        p.writeInt(damage);
+        p.writeInt(attackerId);
+        p.writeByte(direction);
+        p.writeShort(0);
+        p.writeInt(damage);
+        p.writeByte('H');
+        p.writeInt(attackerId);
         return p;
     }
 
@@ -5531,6 +5529,24 @@ public class PacketCreator {
         return p;
     }
 
+    // --- A skill pushes / pulls this hero: everyone on the map draws the same slide (one line)
+    // Related up:   server.skills.StoryAttacks.moveVictim (Blast push, Chain pull, Rescue Rope, Sweep Pull)
+    // Related down: OpenStory StorySlideHandler -> Combat::start_slide (own hero: Player locked, then
+    //               Stage::place_player at `to`; another hero: OtherChar::start_slide)
+    // Layout: int cid, short fromX, short fromY, short toX, short toY, short ms, byte kind (0 push, 1 pull)
+    // Pitfall: corrections (refused move, Dome wall, Anchor rope, Magic Door) stay pullPlayer: instant, no slide.
+    public static Packet storySlide(int cid, Point from, Point to, int ms, boolean pull) {
+        OutPacket p = OutPacket.create(SendOpcode.STORY_SLIDE);
+        p.writeInt(cid);
+        p.writeShort(from.x);
+        p.writeShort(from.y);
+        p.writeShort(to.x);
+        p.writeShort(to.y);
+        p.writeShort(ms);
+        p.writeByte(pull ? 1 : 0);
+        return p;
+    }
+
     // --- This hero's PvP kills and deaths (one line)
     // Related up:   PlayerLoggedinHandler, PvpRecord.count
     // Related down: OpenStory PvpRecordHandler -> CharStats::get_pvp_kills / get_pvp_deaths (Character window)
@@ -5565,7 +5581,7 @@ public class PacketCreator {
     }
 
     // --- StoryFighter Trade Center: one item in the normal item layout, no position (one line)
-    // Related up:   server.starter.TradeCenter (STORY_TRADE 0x19F entries)
+    // Related up:   server.starter.TradeCenter (STORY_TRADE 0x51B entries)
     // Related down: OpenStory ItemParser::parse_item into the Trade Center's own Inventory (UITradeCenter)
     public static void storyTradeItem(OutPacket p, Item item) {
         addItemInfo(p, item, true);
@@ -5635,6 +5651,9 @@ public class PacketCreator {
     // Related down: OpenStory StoryMoveHandler -> Combat::show_story_move (leap burst, grapple rope + arrow, blink puffs)
     // Layout: int character id, int skill id, byte level, byte dir (0 none, 1 up, 2 down, 3 left, 4 right),
     //         short from x, short from y, short to x, short to y (Double Leap: to = from)
+    //         Grapple Arrow two-step (2026-10-28): dir's high bits = phase (dir >> 4): 1 shot (the arrow sticks at
+    //         `to`), 2 pull (the hero is pulled from `from` to `to`), 3 drop (the anchor vanished / snapped), 4 miss
+    //         (the arrow falls from `from`; to = from). MovementSkills.PHASE_*.
     public static Packet storyMove(int chrId, int skillId, int level, int dir, Point from, Point to) {
         OutPacket p = OutPacket.create(SendOpcode.STORY_MOVE);
         p.writeInt(chrId);

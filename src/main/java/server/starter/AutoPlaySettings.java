@@ -21,10 +21,13 @@ public final class AutoPlaySettings {
         chr.rememberAreaInfo(AREA, (aim ? 1 : 0) + "," + (skills ? 1 : 0) + "," + h + "," + m);
     }
 
-    // --- On login: the saved settings, if any (none saved = the client keeps its defaults) (one line)
+    // --- On login: the saved settings, or our defaults when none are saved yet (one line)
+    // Pitfall: Aim starts OFF for every hero (user 2026-10-28); the server sends it so older clients (default on) follow.
+    //          db extension 027 switched it off once for heroes that had it saved on.
     public static void send(Character chr) {
         String raw = chr.getAreaInfo(AREA);
         if (raw == null || raw.isEmpty()) {
+            chr.sendPacket(PacketCreator.autoPlaySettings(false, true, 50, 30));
             return;
         }
         String[] p = raw.split(",");

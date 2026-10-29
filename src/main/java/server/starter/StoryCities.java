@@ -67,7 +67,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   every gold move = one DB transaction under LOCK; the memory side changes after the commit (like StoryBounty).
  *   Nobody takes gold out. An alliance that ends loses its bank and its cities (Server.disbandGuild -> allianceEnded).
  * Missing balance nodes: logged once; monuments take 0 from every hit, deposits / Siege are refused. Never a crash.
- * Packets: recv STORY_CITY 0x10D (op 1 deposit, 2 siege up, 3 refresh, 4 set emblem), send STORY_CITY 0x1AC (op 0 bank,
+ * Packets: recv STORY_CITY 0x186 (op 1 deposit, 2 siege up, 3 refresh, 4 set emblem), send STORY_CITY 0x50A (op 0 bank,
  *   1 monument, 2 city taken, 3 owners of the world). A hero without an alliance gets op 0 with every field 0.
  * Emblems (docs/EMBLEMS.md): the guild columns logo (symbol 1..16, 0 = none), logoColor (0..7, default allianceId % 8),
  *   logoBG (1 = first pick done). Op 4: leader only; the first pick is free, every change after costs cityEmblemCost from
@@ -1012,7 +1012,7 @@ public final class StoryCities {
         chr.sendPacket(monumentPacket(c, mob, now, can));
     }
 
-    // ================================================================ packets in (recv STORY_CITY 0x10D)
+    // ================================================================ packets in (recv STORY_CITY 0x186)
 
     public static final class Handler extends AbstractPacketHandler {
         @Override
@@ -1283,7 +1283,7 @@ public final class StoryCities {
         return owner.isEmpty() ? "No alliance owns " + town + "." : town + " belongs to " + owner + ".";
     }
 
-    // ================================================================ packets out (send STORY_CITY 0x1AC)
+    // ================================================================ packets out (send STORY_CITY 0x50A)
 
     // --- Op 0 to one hero: their alliance's bank, or all zeros without an alliance (one line)
     public static void sendBank(Character chr) {

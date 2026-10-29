@@ -40,7 +40,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * StoryFighter bounties + Wanted Board (user 2026-10-26). Contract: docs/BOUNTY.md (rules, db extension 019,
- * recv STORY_BOUNTY 0x10C, send STORY_BOUNTY 0x1AB). Every rule is checked here; the client only shows the board.
+ * recv STORY_BOUNTY 0x185, send STORY_BOUNTY 0x507). Every rule is checked here; the client only shows the board.
  *
  * Post / add (op 1): only on a map with a Wanted Board ({@link #BOARD_NPC}), at least bountyMinGold, not on yourself,
  *   not on a hero inside the safe time after a collect. Gold is taken from the poster first, then the bounty row, the

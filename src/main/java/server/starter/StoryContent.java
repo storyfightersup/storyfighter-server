@@ -43,12 +43,13 @@ public final class StoryContent {
     public static List<Item> rollDrops(int mobId) {
         List<Item> out = new ArrayList<>();
         for (Drop d : drops.computeIfAbsent(mobId, StoryContent::loadDrops)) {
-            if (Randomizer.nextInt(1_000_000) < server.skills.StoryHex.dropScale(d.chancePerMillion())) {   // Hex: x hexDrop %
+            // Hex: x hexDrop %; then the live drop rate (GM !rate drop, StoryRates), capped at 100 %
+            if (Randomizer.nextInt(1_000_000) < StoryRates.drop(server.skills.StoryHex.dropScale(d.chancePerMillion()), 1_000_000)) {
                 int qty = d.min() + (d.max() > d.min() ? Randomizer.nextInt(d.max() - d.min() + 1) : 0);
                 out.add(new Item(d.itemId(), (short) 0, (short) qty));
             }
         }
-        Item stone = StoryStones.rollDrop(server.skills.StoryHex.dropScale(stoneChance.computeIfAbsent(mobId, StoryContent::loadStoneChance)));   // balance.json, or the monster's own
+        Item stone = StoryStones.rollDrop(StoryRates.drop(server.skills.StoryHex.dropScale(stoneChance.computeIfAbsent(mobId, StoryContent::loadStoneChance)), 1000));   // balance.json, or the monster's own
         if (stone != null) {
             out.add(stone);
         }

@@ -31,7 +31,7 @@ public final class StorySkills {
     /** One skill: its pool row for the client, our type (attack, buff, move), kind (weapon, magic),
      *  move (leap, grapple, blink, or "") and every number of every level (levels.get(level - 1).get("stunTime")). */
     public record Info(SkillPool.Entry entry, String type, String kind, String move, String aim, int base, int base2,
-                       List<Map<String, Integer>> levels) {
+                       int baseLevel, List<Map<String, Integer>> levels) {
         public int value(int level, String name) {
             if (levels.isEmpty() || level < 1) {
                 return 0;
@@ -103,8 +103,11 @@ public final class StorySkills {
     }
 
     // --- Both base skills learned? (storyBase, and storyBase2 for a passive that needs two: Twin Lance, 2026-10-25) (one line)
+    // storyBaseLevel (user 2026-10-29, Iron Leash: Chain 10+): the base skill must be at least this level (default 1);
+    // below it the passive takes no SP and does nothing (passive / passiveId skip it).
     private static boolean basesLearned(Character chr, Info info) {
-        return (info.base() <= 0 || chr.getSkillLevel(info.base()) > 0) && (info.base2() <= 0 || chr.getSkillLevel(info.base2()) > 0);
+        return (info.base() <= 0 || chr.getSkillLevel(info.base()) >= Math.max(1, info.baseLevel()))
+                && (info.base2() <= 0 || chr.getSkillLevel(info.base2()) > 0);
     }
 
     // --- One number summed over the hero's learned passives whose base skill is learned too (0 = none) (one line)
@@ -169,29 +172,92 @@ public final class StorySkills {
         return Math.abs(target.x - from.x) <= reach + REACH_SLACK && Math.abs(target.y - from.y) <= 200;
     }
 
-    // --- Is the target inside the skill's hit box? (one line)
-    // Related down: OpenStory Combat::attack_bounds (the same lt/rb, the whole hit area for a story skill; the art is
-    //               drawn from it). The client tests the monster's body against the box; the server only knows its
-    //               feet and a spot that lags, so BOX_SLACK px are let through, and both sides count (no facing here).
-    // Returns true when the skill has no box.
-    public static final int BOX_SLACK = 60;
-
+    // --- Is a hero's feet point inside the skill's hit box? (PvP, hits on Sentry / Twins) (one line)
+    // Related up:   PvpAttackHandler, StoryUnits (players' hits on units)
+    // Related down: boxGap; OpenStory Combat::hit_players / pick_story_target test the other hero's FEET against the box
+    //               (Rectangle::contains), so no body here. The PvP packet has no facing, so both sides count.
+    // Returns true when the skill has no box. Slack: hitbox_lag_pvp_px (heroes move fast: walk, leaps, Blink).
     public static boolean inBox(Character chr, int skillId, java.awt.Point target) {
+        if (target == null) {
+            return true;
+        }
+        int gap = boxGap(chr, skillId, target, null, 0);
+        return gap <= hitboxLagPvpPx();
+    }
+
+    // --- How many px the target is outside the skill's hit box: 0 = touches it, -1 = the skill has no box (one line)
+    // Related up:   StoryAttacks.aimAllows (monsters: body = MobBodies, facing from the attack packet), inBox (players)
+    // Related down: OpenStory Combat::attack_bounds: the box from skills.json is in the "faces left" way (lt.x < 0 is in
+    //               front); facing right mirrors x. The client then hits a monster whose frame box (lt/rb) OVERLAPS it.
+    // facing: -1 = faces left, 1 = faces right, 0 = unknown (both sides count: the box and its mirror)
+    // body:   the target's box around its feet point (x, y = left top), or null = the feet point only
+    public static int boxGap(Character chr, int skillId, java.awt.Point target, java.awt.Rectangle body, int facing) {
         Info info = get(skillId);
         if (info == null || target == null) {
-            return true;
+            return -1;
         }
         int level = chr.getSkillLevel(skillId);
         int ltX = info.value(level, "ltX"), ltY = info.value(level, "ltY");
         int rbX = info.value(level, "rbX"), rbY = info.value(level, "rbY");
         if (ltX == 0 && ltY == 0 && rbX == 0 && rbY == 0) {
-            return true;
+            return -1;
         }
         java.awt.Point from = chr.getPosition();
-        int dx = Math.abs(target.x - from.x);
-        int dy = target.y - from.y;
-        int reach = Math.max(Math.abs(ltX), Math.abs(rbX));
-        return dx <= reach + BOX_SLACK && dy >= Math.min(ltY, rbY) - BOX_SLACK && dy <= Math.max(ltY, rbY) + BOX_SLACK;
+        int left, right;
+        if (facing < 0) {
+            left = from.x + ltX;
+            right = from.x + rbX;
+        } else if (facing > 0) {
+            left = from.x - rbX;
+            right = from.x - ltX;
+        } else {
+            left = from.x + Math.min(ltX, -rbX);
+            right = from.x + Math.max(rbX, -ltX);
+        }
+        int top = from.y + Math.min(ltY, rbY);
+        int bottom = from.y + Math.max(ltY, rbY);
+        int bl = target.x, br = target.x, bt = target.y, bb = target.y;
+        if (body != null) {
+            bl = target.x + body.x;
+            br = target.x + body.x + body.width;
+            bt = target.y + body.y;
+            bb = target.y + body.y + body.height;
+        }
+        int gapX = Math.max(0, Math.max(Math.min(left, right) - br, bl - Math.max(left, right)));
+        int gapY = Math.max(0, Math.max(top - bb, bt - bottom));
+        return Math.max(gapX, gapY);
+    }
+
+    // --- Lag room of the hit box checks, px (content/balance.json hitbox_lag_px / hitbox_lag_pvp_px) (one line)
+    // Pitfall: read once; before the data build has the nodes, the start values below are used (no error per hit).
+    private static volatile int hitboxLag = -1;
+    private static volatile int hitboxLagPvp = -1;
+
+    public static int hitboxLagPx() {
+        int v = hitboxLag;
+        if (v < 0) {
+            v = balanceOr("hitboxLagPx", 40);
+            hitboxLag = v;
+        }
+        return v;
+    }
+
+    public static int hitboxLagPvpPx() {
+        int v = hitboxLagPvp;
+        if (v < 0) {
+            v = balanceOr("hitboxLagPvpPx", 60);
+            hitboxLagPvp = v;
+        }
+        return v;
+    }
+
+    private static int balanceOr(String node, int fallback) {
+        try {
+            return Math.max(0, server.starter.StoryBalance.number(node));
+        } catch (RuntimeException e) {
+            org.slf4j.LoggerFactory.getLogger(StorySkills.class).warn("balance {} missing (run tools/balance/build_balance.py): using {}", node, fallback);
+            return fallback;
+        }
     }
 
     public static int spPerLevel() {
@@ -357,8 +423,12 @@ public final class StorySkills {
     // Pitfall:      old Explorer skill levels don't count; their SP is not given back twice.
     // Pitfall:      an old build put art nodes inside "level", so the stored master level was 21-22. It is set
     //               back to the skill's real max here, and a level past it comes down (its SP comes back below).
+    // Skill ladder (user 2026-10-29): a skill whose req_level went up past the hero's level goes back to 0 and its
+    //               points come back as SP (below). Heroes at/above the new level keep their points. A passive at 0 does
+    //               nothing (passive / passiveId read the learned level). Keys stay bound, as after a reset.
     public static void fixSp(Character chr) {
         int spent = 0;
+        int refunded = 0;
         for (Integer id : load().keySet()) {
             Skill skill = SkillFactory.getSkill(id);
             if (skill == null) {
@@ -366,6 +436,12 @@ public final class StorySkills {
             }
             int level = chr.getSkillLevel(skill);
             int max = skill.getMaxLevel();
+            if (level > 0 && reqLevel(id) > chr.getLevel()) {
+                org.slf4j.LoggerFactory.getLogger(StorySkills.class).info("skill ladder refund {} {} {}", chr.getName(), id, level);
+                chr.changeSkillLevel(skill, 0, max, -1);
+                refunded += level;
+                continue;
+            }
             if (level > 0 && (level > max || chr.getMasterLevel(skill) != max)) {
                 level = Math.min(level, max);
                 chr.changeSkillLevel(skill, level, max, chr.getSkillExpiration(skill));
@@ -375,6 +451,9 @@ public final class StorySkills {
         int should = Math.max(0, (chr.getLevel() - 1) * spPerLevel() - spent);
         if (chr.getRemainingSp() != should) {
             chr.updateRemainingSp(should);
+        }
+        if (refunded > 0) {
+            chr.dropMessage(5, "Skill update: " + refunded + " SP came back from skills that now unlock at a higher level.");
         }
     }
 
@@ -431,7 +510,7 @@ public final class StorySkills {
             }
             out.put(id, new Info(new SkillPool.Entry(id, category, weapons, 0, reqLevel), type, DataTool.getString("storyKind", d, ""),
                     DataTool.getString("storyMove", d, ""), DataTool.getString("storyAim", d, ""), DataTool.getInt("storyBase", d, 0),
-                    DataTool.getInt("storyBase2", d, 0), Collections.unmodifiableList(levels)));
+                    DataTool.getInt("storyBase2", d, 0), DataTool.getInt("storyBaseLevel", d, 1), Collections.unmodifiableList(levels)));
         }
         return Collections.unmodifiableMap(out);
     }

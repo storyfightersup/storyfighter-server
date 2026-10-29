@@ -162,6 +162,8 @@ public class MapFactory {
                 npc.setScript("wantedBoard");   // the Wanted Board: opens the bounty window (docs/BOUNTY.md)
             } else if (myLife instanceof NPC npc && npc.getId() == server.starter.StoryCities.FLAG_NPC) {
                 npc.setScript("townFlag");   // the Town Flag: who owns this town (docs/EMBLEMS.md)
+            } else if (myLife instanceof NPC npc && npc.getId() == server.starter.StoryCart.NPC_ID) {
+                npc.setScript("goldCart");   // Cartwright Odo: start a gold cart (docs/GOLD-CART.md)
             }
             map.addMapObject(myLife);
         }

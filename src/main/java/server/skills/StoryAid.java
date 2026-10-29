@@ -50,7 +50,7 @@ import java.util.concurrent.ScheduledFuture;
  *                      revivePct % of max HP. No fallen member in reach = nothing spent.
  * Every cast checks weapon, level (SpecialMoveHandler), cooldown and MP (StoryZones.begin) on the server; the client only
  * says "cast" (and nothing else: no target, no spot).
- * Packets (STORY_SKILL_FX 0x1A0, after the kind byte), drawn by OpenStory Gameplay/Combat/StoryAid:
+ * Packets (STORY_SKILL_FX 0x518, after the kind byte), drawn by OpenStory Gameplay/Combat/StoryAid:
  *   kind 23 cast ring: int caster, int skill, short rx, short ry (the oval)
  *   kind 24 roar:      int caster, int skill, int ms left (0 = over)
  *   kind 25 mend ring: int caster, int skill, short rx, short ry, int ms left (0 = over)
@@ -635,7 +635,7 @@ public final class StoryAid {
             }
             Point now = chr.getPosition();
             int side = member.getPosition().x < now.x ? -1 : 1;   // lands on the side it came from
-            StoryAttacks.moveVictim(member, now, new Point(now.x + side * RESCUE_BESIDE, now.y));
+            StoryAttacks.moveVictim(member, now, new Point(now.x + side * RESCUE_BESIDE, now.y), true);   // slides in (pull)
         }, ms);
     }
 

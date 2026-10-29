@@ -206,7 +206,7 @@ public final class StoryStats {
         chr.sendPacket(PacketCreator.storyCrits(crits.size() > 100 ? crits.subList(0, 100) : crits));
     }
 
-    /** Packet STORY_STAT_ADD (0x107): byte kind. */
+    /** Packet STORY_STAT_ADD (0x18C): byte kind. */
     public static final class Handler extends AbstractPacketHandler {
         @Override
         public void handlePacket(InPacket p, Client c) {

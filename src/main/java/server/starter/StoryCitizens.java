@@ -54,9 +54,10 @@ import java.util.concurrent.locks.ReentrantLock;
  *          (every citizenship ends, no refund: StoryTeam.accept / create -> joinedAlliance; the clock and login catch any
  *          other path and heroes who had both before 2026-10-27). A hero offline at a removal / an alliance end gets the
  *          message at the next login (row kept with ended = 1 / 2 until then).
- * Packets: recv STORY_CITY 0x10D ops 5 set fee, 6 leave, 7 remove, 8 refresh (via StoryCities.Handler);
- *          send STORY_CITY 0x1AC op 4 citizen info, op 5 safe heroes on the reader's map. Both at most 1 per second per
- *          hero (a change inside that second is sent by the next tick).
+ * Packets: recv STORY_CITY 0x186 ops 5 set fee, 6 leave, 7 remove, 8 refresh (via StoryCities.Handler);
+ *          send STORY_CITY 0x50A op 4 citizen info, op 5 safe heroes on the reader's map, op 9 citizens of the area
+ *          owner on the map (citizen mark, same list for everyone there). Each at most 1 per second per hero (a change
+ *          inside that second is sent by the next tick).
  * Saved:   db ext 021 (storycitizens; storyalliance.citizenfee). Playtime is saved on logout, every 60 s and on payment.
  *
  * Related up:   StoryCities.Handler (ops 5-8), StoryCities.canHurt / allianceEnded, StoryParty.allies, StoryTeam.accept
@@ -137,6 +138,9 @@ public final class StoryCitizens {
     private static final Map<Integer, Long> SAFE_AT = new ConcurrentHashMap<>();   // hero -> last op 5 ms
     private static final Map<Integer, int[]> SAFE_SENT = new ConcurrentHashMap<>();   // hero -> ids of the last op 5
     private static final Set<Integer> SAFE_FORCE = ConcurrentHashMap.newKeySet();   // send op 5 even when the same (map enter)
+    private static final Map<Integer, Long> MARK_AT = new ConcurrentHashMap<>();   // hero -> last op 9 ms
+    private static final Map<Integer, int[]> MARK_SENT = new ConcurrentHashMap<>();   // hero -> ids of the last op 9
+    private static final Set<Integer> MARK_FORCE = ConcurrentHashMap.newKeySet();   // send op 9 even when the same (map enter)
     private static final Map<Integer, Integer> ASKED = new ConcurrentHashMap<>();   // hero -> join price the flag asked about
     private static final ConcurrentLinkedQueue<Integer> ENDED = new ConcurrentLinkedQueue<>();
     private static final Map<String, Long> LOG_LAST = new ConcurrentHashMap<>();
@@ -489,6 +493,14 @@ public final class StoryCitizens {
             for (Map.Entry<MapleMap, List<Character>> e : byMap.entrySet()) {
                 List<Character> here = e.getValue();
                 int owner = StoryCities.ownerOfTown(w.getId(), e.getKey().getStoryRegion());
+                int[] marks = owner > 0 ? markIds(here, owner) : NONE;   // op 9: one list for the whole map
+                for (Character chr : here) {
+                    int[] last = MARK_SENT.get(chr.getId());
+                    boolean force = MARK_FORCE.contains(chr.getId());
+                    if ((force || last == null || !Arrays.equals(last, marks)) && now - MARK_AT.getOrDefault(chr.getId(), 0L) >= TICK_MS) {
+                        sendMarks(chr, marks, now);
+                    }
+                }
                 boolean any = false;
                 if (owner > 0) {
                     for (Character c : here) {
@@ -526,6 +538,36 @@ public final class StoryCitizens {
         return r;
     }
 
+    // --- Op 9: heroes in this list who are citizens of the owner (citizen mark); alliance members never (they can't be
+    //     citizens; the clock ends a leftover within 1 s). Ids sorted ascending. (one line)
+    private static int[] markIds(Collection<Character> here, int owner) {
+        if (CITS.isEmpty()) {
+            return NONE;
+        }
+        List<Integer> ids = new ArrayList<>();
+        for (Character c : here) {
+            if (c != null && c.getGuildId() <= 0 && isCitizen(c.getId(), owner) && !ids.contains(c.getId())) {
+                ids.add(c.getId());
+            }
+        }
+        int[] r = new int[ids.size()];
+        for (int i = 0; i < r.length; i++) {
+            r[i] = ids.get(i);
+        }
+        Arrays.sort(r);
+        return r;
+    }
+
+    // --- The op 9 list of one hero's map right now (one line)
+    private static int[] markIdsNow(Character chr) {
+        MapleMap map = chr.getMap();
+        if (map == null || CITS.isEmpty()) {
+            return NONE;
+        }
+        int owner = StoryCities.ownerOfTown(chr.getWorld(), map.getStoryRegion());
+        return owner > 0 ? markIds(map.getAllPlayers(), owner) : NONE;
+    }
+
     // --- The op 5 list of one hero right now, from their own map (one line)
     private static int[] safeIdsNow(Character chr) {
         MapleMap map = chr.getMap();
@@ -552,7 +594,7 @@ public final class StoryCitizens {
 
     // ================================================================ hooks
 
-    // --- Login (and channel change): the clock runs, ended-while-offline messages, op 4 + op 5 (one line)
+    // --- Login (and channel change): the clock runs, ended-while-offline messages, op 4 + op 5 + op 9 (one line)
     // Related up:   PlayerLoggedinHandler (Slice.ON block)
     public static void login(Character chr, boolean newcomer) {
         if (!Slice.ON || !started || chr == null) {
@@ -595,6 +637,9 @@ public final class StoryCitizens {
         if (now - SAFE_AT.getOrDefault(chr.getId(), 0L) >= TICK_MS) {
             sendSafe(chr, safeIdsNow(chr), now);   // else the map enter just sent it; changes follow with the tick
         }
+        if (now - MARK_AT.getOrDefault(chr.getId(), 0L) >= TICK_MS) {
+            sendMarks(chr, markIdsNow(chr), now);   // op 9, same rule
+        }
         flushSoon();
     }
 
@@ -629,10 +674,14 @@ public final class StoryCitizens {
         SAFE_AT.remove(id);
         SAFE_SENT.remove(id);
         SAFE_FORCE.remove(id);
+        MARK_AT.remove(id);
+        MARK_SENT.remove(id);
+        MARK_FORCE.remove(id);
         ASKED.remove(id);
     }
 
-    // --- A hero entered a map: op 5 for that map now (or with the next tick if one was sent in the last second) (one line)
+    // --- A hero entered a map: op 5 + op 9 for that map now (or with the next tick if one was sent in the last second)
+    //     (one line). The others on the map get their new op 9 with the next tick.
     // Related up:   MapleMap.addPlayer
     public static void enteredMap(Character chr) {
         if (!Slice.ON || !started || chr == null) {
@@ -643,6 +692,11 @@ public final class StoryCitizens {
             sendSafe(chr, safeIdsNow(chr), now);
         } else {
             SAFE_FORCE.add(chr.getId());
+        }
+        if (now - MARK_AT.getOrDefault(chr.getId(), 0L) >= TICK_MS) {
+            sendMarks(chr, markIdsNow(chr), now);
+        } else {
+            MARK_FORCE.add(chr.getId());
         }
     }
 
@@ -791,7 +845,7 @@ public final class StoryCitizens {
         }
     }
 
-    // ================================================================ packets in (recv STORY_CITY 0x10D ops 5-8)
+    // ================================================================ packets in (recv STORY_CITY 0x186 ops 5-8)
 
     // --- Ops 5-8 from StoryCities.Handler (the request limit and enableActions are done there) (one line)
     static void handle(Character chr, int op, InPacket p) {
@@ -1145,7 +1199,7 @@ public final class StoryCitizens {
                 + "'s members and citizens in the " + StoryCities.townName(town) + " region.");
     }
 
-    // ================================================================ packets out (send STORY_CITY 0x1AC ops 4-5)
+    // ================================================================ packets out (send STORY_CITY 0x50A ops 4, 5, 9)
 
     // --- Op 4 to one hero (one line)
     private static void sendInfo(Character chr, long now) {
@@ -1212,6 +1266,21 @@ public final class StoryCitizens {
         SAFE_FORCE.remove(chr.getId());
         OutPacket p = OutPacket.create(SendOpcode.STORY_CITY);
         p.writeByte(5);
+        int count = Math.min(Short.MAX_VALUE, ids.length);
+        p.writeShort(count);
+        for (int i = 0; i < count; i++) {
+            p.writeInt(ids[i]);
+        }
+        chr.sendPacket(p);
+    }
+
+    // --- Op 9 to one hero: citizens of the area owner on their map (citizen mark; docs/CITIZENS.md "Citizen mark") (one line)
+    private static void sendMarks(Character chr, int[] ids, long now) {
+        MARK_AT.put(chr.getId(), now);
+        MARK_SENT.put(chr.getId(), ids);
+        MARK_FORCE.remove(chr.getId());
+        OutPacket p = OutPacket.create(SendOpcode.STORY_CITY);
+        p.writeByte(9);
         int count = Math.min(Short.MAX_VALUE, ids.length);
         p.writeShort(count);
         for (int i = 0; i < count; i++) {
